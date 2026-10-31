@@ -62,7 +62,9 @@ export { DATA_TAG } from "./tags";
    persona comes from the boards, by a Refresh too) */
 export const PREFAB_TAG = "prefabs";
 /* what is read from a Prefab's file alone, which never changes after upload, so no write
-   expires it: a burst of writes can't make the game's list read every file again (ADR 0016) */
+   expires it: a burst of writes can't make the game's list read every file again (ADR 0016).
+   Nothing in the site revalidates it; it only names these entries, should they ever need a
+   purge by hand (revalidateTag(PREFAB_FILE_TAG)) */
 export const PREFAB_FILE_TAG = "prefab-files";
 
 /* every player's Chosen Skin, expired only by a save (PUT or DELETE /api/me/skin) */

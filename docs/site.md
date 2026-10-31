@@ -864,7 +864,8 @@ branch `claude/prototype-prefabs` (spec #213).
   A write that changes nothing (the same heart sent twice) costs nothing. The thumbnail
   (`getPrefabThumb`) and each size (`getPrefabSize`) are cached in `db/data.ts` apart from those
   reads (`PREFAB_FILE_TAG`), each reading its file fresh, since a cached read inside another
-  passes its tags out.
+  passes its tags out. Nothing revalidates `PREFAB_FILE_TAG`: a file never changes after upload
+  and a thumbnail's link carries its edit time, so the tag is only a handle for a purge by hand.
 
 ## Generators
 

@@ -208,8 +208,18 @@ describe("uploading a Prefab", () => {
       limit: 5,
       nextAt: new Date(NOW + HOUR).toISOString(),
     });
-    const refused = await uploadPrefab(uploading({ name: "One more" }, cookie), deps());
+    // refused before Steam is asked for their persona
+    let asked = 0;
+    const counting = {
+      ...deps(),
+      persona: () => {
+        asked++;
+        return Promise.resolve("Uploader on Steam");
+      },
+    };
+    const refused = await uploadPrefab(uploading({ name: "One more" }, cookie), counting);
     expect(refused.status).toBe(429);
+    expect(asked).toBe(0);
     clock = NOW + HOUR + 1000;
     expect(await quota()).toMatchObject({ left: 1 });
     expect((await uploadPrefab(uploading({ name: "One more" }, cookie), deps())).status).toBe(201);
@@ -613,7 +623,20 @@ describe("from the game, signed in with a Steam ticket (ADR 0016)", () => {
     expect((await prefabOf(t.db, "game-bench"))?.state).toBe("deleted");
   });
 
-  test("a token can't reach the admin's take-down or ban, not even the admin's own", async () => {
+  test("the upload quota reads the token", async () => {
+    const token = await gameToken(OTHER);
+    expect(
+      await (await uploadQuota(fromGame("/api/prefabs", "GET", token), deps())).json(),
+    ).toEqual({
+      signedIn: true,
+      banned: false,
+      left: 4,
+      limit: 5,
+      nextAt: null,
+    });
+  });
+
+  test("a token can't reach the admin's take-down, ban or limits, not even the admin's own", async () => {
     for (const token of [await gameToken(PLAYER), await gameToken(ADMIN_STEAM_ID)]) {
       expect(
         (
@@ -628,8 +651,29 @@ describe("from the game, signed in with a Steam ticket (ADR 0016)", () => {
         (await banUploader(fromGame(`/api/prefab-bans/${OTHER}`, "PUT", token), deps(), OTHER))
           .status,
       ).toBe(401);
+      for (const [method, body] of [
+        ["GET", undefined],
+        ["PUT", json({ perHour: 1000 })],
+        ["DELETE", undefined],
+      ] as const)
+        expect(
+          (
+            await limitUploader(
+              fromGame(`/api/prefab-limits/${PLAYER}`, method, token, body),
+              deps(),
+              PLAYER,
+            )
+          ).status,
+        ).toBe(401);
     }
     expect((await prefabOf(t.db, "their-bench"))?.state).toBe("live");
+    expect(
+      await (
+        await uploadQuota(fromGame("/api/prefabs", "GET", await gameToken(PLAYER)), deps())
+      ).json(),
+    ).toMatchObject({
+      limit: 5,
+    });
   });
 });
 
