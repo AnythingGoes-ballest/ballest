@@ -655,7 +655,7 @@ describe("from the game, signed in with a Steam ticket (ADR 0016)", () => {
         ["GET", undefined],
         ["PUT", json({ perHour: 1000 })],
         ["DELETE", undefined],
-      ] as const)
+      ] as const) {
         expect(
           (
             await limitUploader(
@@ -665,15 +665,14 @@ describe("from the game, signed in with a Steam ticket (ADR 0016)", () => {
             )
           ).status,
         ).toBe(401);
+        // checked after each, so a DELETE later can't hide a PUT that landed
+        const { rows } = await t.db.execute(
+          sql`select count(*)::int as n from prefab_limits where steam_id = ${PLAYER}`,
+        );
+        expect(rows[0]).toEqual({ n: 0 });
+      }
     }
     expect((await prefabOf(t.db, "their-bench"))?.state).toBe("live");
-    expect(
-      await (
-        await uploadQuota(fromGame("/api/prefabs", "GET", await gameToken(PLAYER)), deps())
-      ).json(),
-    ).toMatchObject({
-      limit: 5,
-    });
   });
 });
 
