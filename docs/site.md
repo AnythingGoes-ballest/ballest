@@ -861,7 +861,7 @@ branch `claude/prototype-prefabs` (spec #213).
   included, reads the cookie alone (`sessionOf`). Every edit, and every heart added or taken
   back, counts against 60 an hour per player (`HOURLY_PREFAB_WRITES`, a bucket of
   `db/hourly-limit.ts`), since each expires the cached Prefab reads; deleting one's own is never held back.
-  A write that changes nothing (the same heart sent twice) costs nothing. The thumbnail
+  A heart that changes nothing (the same heart sent twice) costs nothing. The thumbnail
   (`getPrefabThumb`) and each size (`getPrefabSize`) are cached in `db/data.ts` apart from those
   reads (`PREFAB_FILE_TAG`), each reading its file fresh, since a cached read inside another
   passes its tags out. Nothing revalidates `PREFAB_FILE_TAG`: a file never changes after upload

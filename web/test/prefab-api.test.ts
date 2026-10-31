@@ -624,7 +624,9 @@ describe("from the game, signed in with a Steam ticket (ADR 0016)", () => {
   });
 
   test("the upload quota reads the token", async () => {
-    const token = await gameToken(OTHER);
+    const id = "76561199000000063";
+    const token = await gameToken(id);
+    await uploadPrefab(fromGame("/api/prefabs", "POST", token, form("Quota bench")), deps());
     expect(
       await (await uploadQuota(fromGame("/api/prefabs", "GET", token), deps())).json(),
     ).toEqual({
