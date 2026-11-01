@@ -166,6 +166,9 @@ export const adminActionOf = (search: string): AdminAction | null => {
 export const prefabsApiHref = () => "/api/prefabs";
 export const prefabApiHref = (slug: string) => "/api/prefabs/" + slug;
 export const prefabFileHref = (slug: string) => prefabApiHref(slug) + "/file";
+/* its thumbnail, named by its last edit so a new angle isn't served from the CDN's old copy */
+export const prefabThumbHref = (slug: string, updatedAt: string) =>
+  `${prefabApiHref(slug)}/thumb?v=${String(Date.parse(updatedAt))}`;
 export const prefabFavoriteHref = (slug: string) => prefabApiHref(slug) + "/favorite";
 export const prefabTakeDownHref = (slug: string) => prefabApiHref(slug) + "/takedown";
 export const prefabBanHref = (id: string) => (isSteamId(id) ? "/api/prefab-bans/" + id : null);

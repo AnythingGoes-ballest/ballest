@@ -369,6 +369,8 @@ describe("a Prefab's angle", () => {
       { ...ok, pan: [PAN_MAX + 1, 0, 0] },
       { ...ok, from: [NaN, 0, 1] },
       { ...ok, pan: [Infinity, 0, 0] },
+      // each part finite, but too long to measure: it would tidy to [0, 0, 0]
+      { ...ok, from: [1.7e308, 1.7e308, 1.7e308] },
     ])
       expect(checkAngle(bad)).toBeNull();
   });

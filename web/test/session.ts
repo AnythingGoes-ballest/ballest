@@ -1,6 +1,7 @@
 // Sign in with Steam as the routes see it (lib/auth.ts), with a stand-in for Steam's
-// check_authentication: a test signs a browser in and sends its session cookie.
-import { finishSignIn, startSignIn, type AuthEnv } from "../lib/auth";
+// check_authentication: a test signs a browser in and sends its session cookie. Or the game
+// signs in with a ticket, with a stand-in for AuthenticateUserTicket, and sends its token.
+import { finishSignIn, signInFromGame, startSignIn, type AuthEnv } from "../lib/auth";
 
 export const SITE = "https://ballestrecords.com";
 export const ID = "76561198008697957";
@@ -9,6 +10,38 @@ export const ENV: AuthEnv = { secret: "s3cret", now: NOW, steam: steamSays("is_v
 
 export function steamSays(answer: string): typeof fetch {
   return () => Promise.resolve(new Response(answer));
+}
+
+/* Steam's AuthenticateUserTicket accepting a ticket as `id`'s. The body is the documented
+   success shape (partner.steamgames.com/doc/webapi/ISteamUserAuth); the MK Mushroom Cup
+   hiscores server reads the same `result` and `steamid` from real players' tickets. */
+export function steamTicketIs(id: string): typeof fetch {
+  return () =>
+    Promise.resolve(
+      Response.json({
+        response: {
+          params: {
+            result: "OK",
+            steamid: id,
+            ownersteamid: id,
+            vacbanned: false,
+            publisherbanned: false,
+          },
+        },
+      }),
+    );
+}
+
+/* the game signed in as `id` through POST /api/auth/steam/ticket: its bearer token */
+export async function gameToken(id = ID, env: AuthEnv = ENV): Promise<string> {
+  const r = await signInFromGame(
+    new Request(SITE + "/api/auth/steam/ticket", {
+      method: "POST",
+      body: JSON.stringify({ ticket: "14000000aabbccdd00112233" }),
+    }),
+    { ...env, steam: steamTicketIs(id), steamKey: "test-key" },
+  );
+  return ((await r.json()) as { token: string }).token;
 }
 
 /* the Set-Cookie headers of a response, by name */

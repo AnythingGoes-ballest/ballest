@@ -842,6 +842,30 @@ branch `claude/prototype-prefabs` (spec #213).
   can give the uploader their own hourly upload limit, or put them back on the 5
   (`/api/prefab-limits/<steam_id>`, the `prefab_limits` table); nothing cached reads it, as
   the upload form asks for its quota uncached.
+- **From the game** (ADR 0016): the Prefabs plugin browses signed out with
+  `GET /api/prefab-list?sort=popular|newest&tag=&q=&cursor=&limit=` (`listQueryOf` and
+  `listPageOf` in `lib/prefabs.ts`: the gallery's order and tag, every word of `q` found in the
+  name, description, a tag or the uploader; 50 a page, up to 100), answered as
+  `{ total, next, prefabs }` with `next` the cursor of the page after or null. Each entry is what
+  a Prefab's page shows beside its viewer (the size from `getPrefabSize`, read once per file)
+  plus its `thumb` (`/api/prefabs/<slug>/thumb?v=<last edit>`, 320 × 200, clear around the
+  Prefab, drawn like the share image, kept for days per edit, and drawn only at that address:
+  any other query is sent there) and its `file`. The CDN keeps each query a minute. To write,
+  it posts a Steam Web API ticket of its player, made out to `ballest-plugin:prefabs`, to
+  `POST /api/auth/steam/ticket` (`signInFromGame` in `lib/auth.ts`, checked by
+  `lib/steam-ticket.ts` with `STEAM_API_KEY`; 30 an hour per address, an IPv6 one by its /64,
+  and 2,000 in all, `db/game-sign-in.ts`), and
+  sends the game token it gets back (good for a day) as `Authorization: Bearer` on the same
+  Prefab routes the site's pages use. They read it with `prefabSessionOf`, the bearer before the
+  cookie, so every rule above holds for the game unchanged; every other route, the admin's
+  included, reads the cookie alone (`sessionOf`). Every edit, and every heart added or taken
+  back, counts against 60 an hour per player (`HOURLY_PREFAB_WRITES`, a bucket of
+  `db/hourly-limit.ts`), since each expires the cached Prefab reads; deleting one's own is never held back.
+  A heart that changes nothing (the same heart sent twice) costs nothing. The thumbnail
+  (`getPrefabThumb`) and each size (`getPrefabSize`) are cached in `db/data.ts` apart from those
+  reads (`PREFAB_FILE_TAG`), each reading its file fresh, since a cached read inside another
+  passes its tags out. Nothing revalidates `PREFAB_FILE_TAG`: a file never changes after upload
+  and a thumbnail's link carries its edit time, so the tag is only a handle for a purge by hand.
 
 ## Generators
 

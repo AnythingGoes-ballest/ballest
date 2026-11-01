@@ -307,6 +307,23 @@ export const prefabFavorites = pgTable(
   (t) => [primaryKey({ columns: [t.prefabId, t.steamId] })],
 );
 
+// One spend of a rolling-hour limit (db/hourly-limit.ts, ADR 0016): a heart, an unheart or an
+// edit a player made to a Prefab (each expires the cached Prefab reads), or a sign-in from the
+// game by its address (each costs a call on the site's Steam Web API key). Kept an hour.
+export const hourlySpends = pgTable(
+  "hourly_spends",
+  {
+    bucket: text("bucket").notNull(),
+    key: text("key").notNull(),
+    spentAt: timestamp("spent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("hourly_spends_key").on(t.bucket, t.key, t.spentAt),
+    /* the hour's pruning and a cap on all find a bucket's rows by time alone */
+    index("hourly_spends_at").on(t.bucket, t.spentAt),
+  ],
+);
+
 // A player the admin has stopped uploading. Their Prefabs read as hidden while the row is here.
 export const prefabBans = pgTable("prefab_bans", {
   steamId: text("steam_id").primaryKey(),

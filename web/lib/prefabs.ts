@@ -13,6 +13,10 @@ export const DESCRIPTION_MAX = 500;
 export const HOURLY_UPLOADS = 5;
 export const MAX_HOURLY_UPLOADS = 1000;
 export const UPLOAD_WINDOW_MS = 3_600_000;
+/* the hearts, unhearts and edits a player may make in a rolling hour: plenty for browsing the
+   gallery, few enough that one account can't keep expiring the cached Prefab reads
+   (db/prefab-api.ts, ADR 0016) */
+export const HOURLY_PREFAB_WRITES = 60;
 
 /* what GET /api/prefabs tells the upload form: who may upload, how many more they may now
    of their hourly limit, and, at none, when the next frees up */
@@ -106,7 +110,10 @@ export function checkAngle(raw: unknown): PrefabAngle | null {
   const vec = (v: unknown): v is Vec3 =>
     Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === "number" && isFinite(x));
   if (!vec(from) || !vec(pan) || typeof zoom !== "number") return null;
-  if (Math.hypot(...from) < 1e-6 || !(zoom >= ZOOM_RANGE[0] && zoom <= ZOOM_RANGE[1])) return null;
+  /* a direction too long to measure (its length overflows) would tidy to nothing */
+  const length = Math.hypot(...from);
+  if (!(length >= 1e-6 && isFinite(length))) return null;
+  if (!(zoom >= ZOOM_RANGE[0] && zoom <= ZOOM_RANGE[1])) return null;
   if (pan.some((x) => Math.abs(x) > PAN_MAX)) return null;
   const r = (x: number) => Math.round(x * 1e4) / 1e4 || 0;
   return { from: unit(from).map(r) as Vec3, zoom: r(zoom), pan: pan.map(r) as Vec3 };
@@ -133,6 +140,63 @@ export function galleryOf<T extends Sortable>(
     .sort((a, b) =>
       sort === "popular" ? b.favorites - a.favorites || newest(a, b) : newest(a, b),
     );
+}
+
+/* the game's list (ADR 0016) is read a page at a time: 50 unless it asks for up to 100 */
+export const LIST_PAGE = 50;
+export const LIST_MOST = 100;
+const QUERY_MAX = 100;
+
+export interface ListQuery {
+  sort: GallerySort;
+  tag: string | null;
+  q: string;
+  offset: number;
+  limit: number;
+}
+
+/* what `?sort=&tag=&q=&cursor=&limit=` asks the game's list for, or null when a value
+   can't be one: Popular unless it says newest, any tag from TAGS, words to look for, and
+   the cursor a page before answered as `next` */
+export function listQueryOf(params: URLSearchParams): ListQuery | null {
+  const whole = (v: string | null, fallback: number) =>
+    v === null ? fallback : /^\d{1,6}$/.test(v) ? Number(v) : NaN;
+  const sort = params.get("sort") ?? "popular";
+  const tag = params.get("tag");
+  const q = (params.get("q") ?? "").trim();
+  const offset = whole(params.get("cursor"), 0);
+  const limit = whole(params.get("limit"), LIST_PAGE);
+  if (sort !== "popular" && sort !== "newest") return null;
+  if (tag !== null && !(TAGS as ReadonlyArray<string>).includes(tag)) return null;
+  if (q.length > QUERY_MAX || Number.isNaN(offset) || !(limit >= 1 && limit <= LIST_MOST))
+    return null;
+  return { sort, tag, q, offset, limit };
+}
+
+interface Listable extends Sortable {
+  name: string;
+  description: string;
+  uploader: { name: string };
+}
+
+/* one page of the game's list: the gallery's order and tag, kept to the Prefabs where every
+   word of `q` is in the name, the description, a tag or the uploader's name, with how many
+   match in all and the cursor of the page after (null at the end) */
+export function listPageOf<T extends Listable>(
+  cards: ReadonlyArray<T>,
+  { sort, tag, q, offset, limit }: ListQuery,
+): { total: number; next: number | null; page: Array<T> } {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const found = galleryOf(cards, sort, tag).filter((c) => {
+    const text = [c.name, c.description, c.uploader.name, ...c.tags].join("\n").toLowerCase();
+    return words.every((w) => text.includes(w));
+  });
+  const end = offset + limit;
+  return {
+    total: found.length,
+    next: end < found.length ? end : null,
+    page: found.slice(offset, end),
+  };
 }
 
 /* a Prefab's link from its first name: lower case, every other run of characters a dash */

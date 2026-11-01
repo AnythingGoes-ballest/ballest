@@ -116,7 +116,8 @@ export async function prefabOf(db: Db, slug: string): Promise<PrefabView | null>
   return found.at(0) ?? null;
 }
 
-export type PrefabCard = Omit<PrefabView, "file" | "description">;
+/* VIEW reads the description too, which the game's list searches and shows */
+export type PrefabCard = Omit<PrefabView, "file">;
 
 /* a Prefab anyone can see: not deleted, not taken down, its uploader not banned */
 export const LIVE = sql`p.deleted_at is null and p.taken_down_at is null

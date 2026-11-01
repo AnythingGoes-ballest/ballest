@@ -6,10 +6,11 @@
 // to expire after a write.
 import { and, eq, isNull, sql } from "drizzle-orm";
 
-import { isCrossSite, sessionOf, type AuthEnv } from "../lib/auth";
+import { isCrossSite, prefabSessionOf, sessionOf, type AuthEnv } from "../lib/auth";
 import { checkPrefab } from "../lib/prefab-check";
 import {
   ADMIN_STEAM_ID,
+  HOURLY_PREFAB_WRITES,
   HOURLY_UPLOADS,
   MAX_HOURLY_UPLOADS,
   NO_UPLOADS,
@@ -23,6 +24,7 @@ import {
 } from "../lib/prefabs";
 import { isSteamId } from "../lib/rules";
 import type { Db } from "./client";
+import { spendHourly, type Bucket } from "./hourly-limit";
 import { discordPing, type PrefabPing } from "./prefab-ping";
 import { LIVE, addPrefab, prefabOf, type Conn } from "./prefabs";
 import { prefabBans, prefabLimits, prefabs } from "./schema";
@@ -72,9 +74,16 @@ async function isBanned(db: Conn, steamId: string) {
   return rows.length > 0;
 }
 
+/* why `steamId` can't upload now, banned or over their hourly limit, or null when they can */
+async function refusalOf(db: Conn, steamId: string, at: number) {
+  if (await isBanned(db, steamId)) return { status: 403 as const };
+  const quota = await quotaOf(db, steamId, at);
+  return quota.left ? null : { status: 429 as const, limit: quota.limit, nextAt: quota.nextAt };
+}
+
 /* GET /api/prefabs: what the upload form tells the reader before they start */
 export async function uploadQuota(request: Request, deps: PrefabDeps): Promise<Response> {
-  const id = sessionOf(request, deps.auth);
+  const id = prefabSessionOf(request, deps.auth);
   const quota: UploadQuota = !id
     ? NO_UPLOADS
     : (await isBanned(deps.db, id))
@@ -144,7 +153,7 @@ async function formOf(request: Request): Promise<
    their checks */
 export async function uploadPrefab(request: Request, deps: PrefabDeps): Promise<Response> {
   if (isCrossSite(request)) return json({ error: "cross-site" }, 403);
-  const id = sessionOf(request, deps.auth);
+  const id = prefabSessionOf(request, deps.auth);
   if (!id) return json({ error: "sign in with Steam to upload" }, 401);
   const form = await formOf(request);
   if (!form) return json({ problems: ["That upload didn't arrive whole. Try again."] }, 400);
@@ -161,23 +170,27 @@ export async function uploadPrefab(request: Request, deps: PrefabDeps): Promise<
       },
       400,
     );
-  const uploaderName = await (deps.persona ?? steamPersona)(id).catch(() => null);
-  const result = await deps.db.transaction(async (tx) => {
-    /* one upload at a time per player, so two at once can't both take the last slot */
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"prefab-upload:" + id}))`);
-    if (await isBanned(tx, id)) return { status: 403 as const };
-    const quota = await quotaOf(tx, id, now(deps));
-    if (!quota.left) return { status: 429 as const, limit: quota.limit, nextAt: quota.nextAt };
-    const { slug } = await addPrefab(tx, {
-      ...fields.fields,
-      uploader: id,
-      uploaderName,
-      file: form.file,
-      angle: form.angle,
-      createdAt: new Date(now(deps)),
-    });
-    return { status: 201 as const, slug };
-  });
+  /* a banned or spent uploader is refused before Steam is asked for their persona, and asked
+     again under the lock, for an upload that raced this one */
+  const early = await refusalOf(deps.db, id, now(deps));
+  const uploaderName = early ? null : await (deps.persona ?? steamPersona)(id).catch(() => null);
+  const result =
+    early ??
+    (await deps.db.transaction(async (tx) => {
+      /* one upload at a time per player, so two at once can't both take the last slot */
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"prefab-upload:" + id}))`);
+      const refused = await refusalOf(tx, id, now(deps));
+      if (refused) return refused;
+      const { slug } = await addPrefab(tx, {
+        ...fields.fields,
+        uploader: id,
+        uploaderName,
+        file: form.file,
+        angle: form.angle,
+        createdAt: new Date(now(deps)),
+      });
+      return { status: 201 as const, slug };
+    }));
   if (result.status === 403) return json({ error: "you can't upload prefabs" }, 403);
   if (result.status === 429)
     return json(
@@ -211,6 +224,35 @@ export async function steamPersona(steamId: string): Promise<string | null> {
   return m?.[1].trim().slice(0, 64) || null; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- an empty persona is none
 }
 
+const WRITES_SPENT = "that's your hearts and edits for the last hour";
+
+/* a heart added or taken back, or an edit: each expires the cached Prefab reads */
+const PREFAB_WRITES: Bucket = { name: "prefab-write", perKey: HOURLY_PREFAB_WRITES };
+
+/* thrown inside a write's transaction to roll the write back when its spend is refused */
+class Spent extends Error {}
+
+/* makes `write` in one transaction, which says whether it changed anything; a change spends
+   one of `steamId`'s hourly writes, and with none left it is rolled back. "same" when
+   nothing changed, so it cost nothing */
+async function spendingWrite(
+  db: Db,
+  steamId: string,
+  at: number,
+  write: (tx: Conn) => Promise<boolean>,
+): Promise<"changed" | "same" | "spent"> {
+  try {
+    return await db.transaction(async (tx) => {
+      if (!(await write(tx))) return "same";
+      if (!(await spendHourly(tx, PREFAB_WRITES, steamId, at))) throw new Spent();
+      return "changed";
+    });
+  } catch (e) {
+    if (e instanceof Spent) return "spent";
+    throw e;
+  }
+}
+
 /* a live Prefab's id and uploader by its slug, or null: deleted, taken down and hidden
    ones can't be hearted or edited */
 async function liveOf(db: Conn, slug: string): Promise<{ id: number; uploader: string } | null> {
@@ -229,19 +271,26 @@ export async function favoritePrefab(
 ): Promise<Response> {
   const write = request.method !== "GET";
   if (write && isCrossSite(request)) return json({ error: "cross-site" }, 403);
-  const id = sessionOf(request, deps.auth);
+  const id = prefabSessionOf(request, deps.auth);
   if (write && !id) return json({ error: "sign in with Steam to favorite" }, 401);
   const prefab = (await liveOf(deps.db, slug))?.id;
   if (prefab === undefined) return json({ error: "no such prefab" }, 404);
-  if (id && request.method === "PUT")
-    await deps.db.execute(sql`
-      insert into prefab_favorites (prefab_id, steam_id) values (${prefab}, ${id})
-      on conflict do nothing`);
-  if (id && request.method === "DELETE")
-    await deps.db.execute(
-      sql`delete from prefab_favorites where prefab_id = ${prefab} and steam_id = ${id}`,
-    );
-  if (write) deps.changed?.();
+  if (id && write) {
+    /* a heart added or taken back counts against the player's hourly writes and expires the
+       cached reads; one that changes nothing, such as the same heart sent twice at once,
+       costs neither */
+    const done = await spendingWrite(deps.db, id, now(deps), async (tx) => {
+      const { rowCount } = await tx.execute(
+        request.method === "PUT"
+          ? sql`insert into prefab_favorites (prefab_id, steam_id) values (${prefab}, ${id})
+                on conflict do nothing`
+          : sql`delete from prefab_favorites where prefab_id = ${prefab} and steam_id = ${id}`,
+      );
+      return (rowCount ?? 0) > 0;
+    });
+    if (done === "spent") return json({ error: WRITES_SPENT }, 429);
+    if (done === "changed") deps.changed?.();
+  }
   const { rows } = await deps.db.execute(sql`
     select count(*)::int as favorites, coalesce(bool_or(steam_id = ${id ?? ""}), false) as on
     from prefab_favorites where prefab_id = ${prefab}`);
@@ -250,22 +299,27 @@ export async function favoritePrefab(
 
 /* PATCH /api/prefabs/<slug> with { name, description, tags } and or { angle }: the uploader
    edits what the gallery and page say, or the view its picture is drawn from (null for the
-   default); the file and the link stay. DELETE: the uploader deletes it; its row stays, so it
-   still counts against their hourly limit, and its page reads gone */
+   default); the file and the link stay. Each edit counts against the uploader's hourly hearts
+   and edits. DELETE: the uploader deletes it, whatever they have left, since it happens once;
+   its row stays, so it still counts against their hourly upload limit, and its page reads
+   gone. Either is made only while the Prefab is still live when it lands */
 export async function editPrefab(
   request: Request,
   deps: PrefabDeps,
   slug: string,
 ): Promise<Response> {
   if (isCrossSite(request)) return json({ error: "cross-site" }, 403);
-  const id = sessionOf(request, deps.auth);
+  const id = prefabSessionOf(request, deps.auth);
   if (!id) return json({ error: "sign in with Steam" }, 401);
   const prefab = await liveOf(deps.db, slug);
   if (!prefab) return json({ error: "no such prefab" }, 404);
   if (prefab.uploader !== id) return json({ error: "only its uploader can change it" }, 403);
   const at = new Date(now(deps)).toISOString();
   if (request.method === "DELETE") {
-    await deps.db.execute(sql`update prefabs set deleted_at = ${at} where id = ${prefab.id}`);
+    const { rowCount } = await deps.db.execute(
+      sql`update prefabs p set deleted_at = ${at} where p.id = ${prefab.id} and ${LIVE}`,
+    );
+    if (!rowCount) return json({ error: "no such prefab" }, 404);
     deps.changed?.();
     return json({ deleted: slug });
   }
@@ -292,7 +346,25 @@ export async function editPrefab(
     if (angle === undefined) return json({ problems: [BAD_ANGLE] }, 400);
     set.angle = angle;
   }
-  await deps.db.update(prefabs).set(set).where(eq(prefabs.id, prefab.id));
+  const edited = await spendingWrite(deps.db, id, now(deps), async (tx) => {
+    /* still live as it lands: an edit racing a take-down, a ban or its own delete changes
+       nothing */
+    const done = await tx
+      .update(prefabs)
+      .set(set)
+      .where(
+        and(
+          eq(prefabs.id, prefab.id),
+          isNull(prefabs.deletedAt),
+          isNull(prefabs.takenDownAt),
+          sql`not exists (select 1 from prefab_bans b where b.steam_id = ${prefabs.uploader})`,
+        ),
+      )
+      .returning({ id: prefabs.id });
+    return done.length > 0;
+  });
+  if (edited === "spent") return json({ error: WRITES_SPENT }, 429);
+  if (edited === "same") return json({ error: "no such prefab" }, 404);
   deps.changed?.();
   return json({ slug });
 }

@@ -2,6 +2,7 @@
 // a throwaway database: what each answers, and what the gallery and pages then read.
 import { readFileSync } from "node:fs";
 
+import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 
 import {
@@ -15,12 +16,12 @@ import {
   type PrefabDeps,
 } from "../db/prefab-api";
 import { pingOf, type PrefabPing } from "../db/prefab-ping";
-import { galleryOf } from "../lib/prefabs";
-import { prefabList, prefabOf } from "../db/prefabs";
+import { ADMIN_STEAM_ID, HOURLY_PREFAB_WRITES, galleryOf } from "../lib/prefabs";
+import { addPrefab, prefabList, prefabOf } from "../db/prefabs";
 import { prefabBans } from "../db/schema";
 import { cubesFile } from "../db/seed/datasets/tiny";
 import { freshDb } from "./pg";
-import { ENV, NOW, SITE, signIn } from "./session";
+import { ENV, NOW, SITE, gameToken, signIn } from "./session";
 
 const UPLOADER = "76561199000000011";
 const HOUR = 3_600_000;
@@ -207,8 +208,18 @@ describe("uploading a Prefab", () => {
       limit: 5,
       nextAt: new Date(NOW + HOUR).toISOString(),
     });
-    const refused = await uploadPrefab(uploading({ name: "One more" }, cookie), deps());
+    // refused before Steam is asked for their persona
+    let asked = 0;
+    const counting = {
+      ...deps(),
+      persona: () => {
+        asked++;
+        return Promise.resolve("Uploader on Steam");
+      },
+    };
+    const refused = await uploadPrefab(uploading({ name: "One more" }, cookie), counting);
     expect(refused.status).toBe(429);
+    expect(asked).toBe(0);
     clock = NOW + HOUR + 1000;
     expect(await quota()).toMatchObject({ left: 1 });
     expect((await uploadPrefab(uploading({ name: "One more" }, cookie), deps())).status).toBe(201);
@@ -222,7 +233,17 @@ describe("uploading a Prefab", () => {
       banned: true,
       left: 0,
     });
-    expect((await uploadPrefab(uploading({ name: "Sneaky" }, cookie), deps())).status).toBe(403);
+    // refused before Steam is asked for their persona
+    let asked = 0;
+    const counting = {
+      ...deps(),
+      persona: () => {
+        asked++;
+        return Promise.resolve("Banned on Steam");
+      },
+    };
+    expect((await uploadPrefab(uploading({ name: "Sneaky" }, cookie), counting)).status).toBe(403);
+    expect(asked).toBe(0);
   });
 
   test("signed out, the quota says so", async () => {
@@ -278,7 +299,81 @@ describe("favorites", () => {
       status: 200,
       body: { on: false, favorites: 1 },
     });
-    expect(changes).toBe(4);
+    // the repeated PUT changed nothing, so it expired nothing
+    expect(changes).toBe(3);
+    await favoritePrefab(fav("heart-me", "DELETE", a), deps(), "heart-me");
+    expect(changes).toBe(3);
+  });
+
+  test("a player has 60 hearts and edits an hour; past that nothing changes and nothing expires", async () => {
+    const owner = await sessionOf("76561199000000024");
+    await uploadPrefab(uploading({ name: "Heart me lots" }, owner), deps());
+    const fan = await sessionOf("76561199000000025");
+    const slug = "heart-me-lots";
+    for (let i = 0; i < HOURLY_PREFAB_WRITES; i++) {
+      const r = await favoritePrefab(fav(slug, i % 2 ? "DELETE" : "PUT", fan), deps(), slug);
+      expect(r.status).toBe(200);
+    }
+    changes = 0;
+    const over = await favoritePrefab(fav(slug, "PUT", fan), deps(), slug);
+    expect(over.status).toBe(429);
+    expect(await over.json()).toEqual({ error: "that's your hearts and edits for the last hour" });
+    expect((await prefabOf(t.db, slug))?.favorites).toBe(0);
+    // spent, a heart that changes nothing (taking back one not there) still answers
+    expect((await favoritePrefab(fav(slug, "DELETE", fan), deps(), slug)).status).toBe(200);
+    expect(changes).toBe(0);
+    // an hour on, they have them again
+    clock = NOW + HOUR + MINUTE;
+    expect((await favoritePrefab(fav(slug, "PUT", fan), deps(), slug)).status).toBe(200);
+    expect((await prefabOf(t.db, slug))?.favorites).toBe(1);
+    // and leave it unhearted for the gallery's order below
+    await favoritePrefab(fav(slug, "DELETE", fan), deps(), slug);
+  });
+
+  test("many hearts at once can't take more than the hour's writes", async () => {
+    const fan = await sessionOf("76561199000000026");
+    const slugs = await Promise.all(
+      Array.from({ length: HOURLY_PREFAB_WRITES + 10 }, (_, i) =>
+        addPrefab(t.db, {
+          name: `Rush ${String(i)}`,
+          description: "",
+          tags: [],
+          uploader: "76561199000000027",
+          uploaderName: null,
+          file: bench,
+        }).then((p) => p.slug),
+      ),
+    );
+    const said = await Promise.all(
+      slugs.map(async (s) => (await favoritePrefab(fav(s, "PUT", fan), deps(), s)).status),
+    );
+    expect(said.filter((s) => s === 200).length).toBe(HOURLY_PREFAB_WRITES);
+    expect(said.filter((s) => s === 429).length).toBe(10);
+    // leave them unhearted for the gallery's order below
+    await t.db.execute(sql`delete from prefab_favorites where steam_id = '76561199000000026'`);
+  });
+
+  test("the same heart sent twice at once lands once and costs one write", async () => {
+    const fan = await sessionOf("76561199000000028");
+    const { slug } = await addPrefab(t.db, {
+      name: "Double tap",
+      description: "",
+      tags: [],
+      uploader: "76561199000000027",
+      uploaderName: null,
+      file: bench,
+    });
+    for (const method of ["PUT", "DELETE"]) {
+      const said = await Promise.all(
+        [0, 1].map(async () => (await favoritePrefab(fav(slug, method, fan), deps(), slug)).status),
+      );
+      expect(said).toEqual([200, 200]);
+    }
+    expect((await prefabOf(t.db, slug))?.favorites).toBe(0);
+    const { rows } = await t.db.execute(
+      sql`select count(*)::int as n from hourly_spends where key = '76561199000000028'`,
+    );
+    expect(rows[0]).toEqual({ n: 2 });
   });
 
   test("signed out it only counts, and asks to sign in to change", async () => {
@@ -334,6 +429,55 @@ describe("editing and deleting your own", () => {
     expect(changes).toBe(1);
   });
 
+  test("edits count against the same hourly writes as hearts", async () => {
+    const owner = await sessionOf("76561199000000033");
+    await uploadPrefab(uploading({ name: "Edit me lots" }, owner), deps());
+    const edit = { name: "Edit me lots", description: "", tags: [] };
+    for (let i = 0; i < HOURLY_PREFAB_WRITES; i++)
+      expect(
+        (await editPrefab(change("edit-me-lots", "PATCH", owner, edit), deps(), "edit-me-lots"))
+          .status,
+      ).toBe(200);
+    expect(
+      (await editPrefab(change("edit-me-lots", "PATCH", owner, edit), deps(), "edit-me-lots"))
+        .status,
+    ).toBe(429);
+    expect((await prefabOf(t.db, "edit-me-lots"))?.state).toBe("live");
+    // deleting their own happens once, so it isn't held back
+    expect(
+      (await editPrefab(change("edit-me-lots", "DELETE", owner), deps(), "edit-me-lots")).status,
+    ).toBe(200);
+    expect((await prefabOf(t.db, "edit-me-lots"))?.state).toBe("deleted");
+  });
+
+  test("an edit landing after a take-down changes nothing", async () => {
+    const owner = await sessionOf("76561199000000034");
+    await uploadPrefab(uploading({ name: "Taken mid edit" }, owner), deps());
+    // the take-down lands between the edit's checks and its write
+    const deps2 = deps();
+    const racing: PrefabDeps = {
+      ...deps2,
+      db: new Proxy(deps2.db, {
+        get(target, key, receiver) {
+          if (key !== "transaction") return Reflect.get(target, key, receiver) as unknown;
+          return async (fn: Parameters<typeof target.transaction>[0]) => {
+            await target.execute(
+              sql`update prefabs set taken_down_at = now() where slug = 'taken-mid-edit'`,
+            );
+            return target.transaction(fn);
+          };
+        },
+      }),
+    };
+    const r = await editPrefab(
+      change("taken-mid-edit", "PATCH", owner, { name: "Sneaked", description: "", tags: [] }),
+      racing,
+      "taken-mid-edit",
+    );
+    expect(r.status).toBe(404);
+    expect((await prefabOf(t.db, "taken-mid-edit"))?.name).toBe("Taken mid edit");
+  });
+
   test("fields out of bounds are refused as on upload", async () => {
     const owner = await sessionOf(OWNER);
     const r = await editPrefab(
@@ -378,6 +522,159 @@ describe("editing and deleting your own", () => {
     expect(
       (await editPrefab(change("mine-to-edit", "DELETE", owner), deps(), "mine-to-edit")).status,
     ).toBe(404);
+  });
+});
+
+describe("from the game, signed in with a Steam ticket (ADR 0016)", () => {
+  const PLAYER = "76561199000000061";
+  const OTHER = "76561199000000062";
+  /* a request as the game sends it: the token as a bearer, no cookie, no Origin */
+  const fromGame = (path: string, method: string, token: string, body?: BodyInit) =>
+    new Request(SITE + path, {
+      method,
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+      body,
+    });
+  const form = (name: string) => {
+    const body = new FormData();
+    body.set("name", name);
+    body.set("description", "");
+    body.set("file", new Blob([bench]), "bench.json");
+    return body;
+  };
+  const json = (body: object) => JSON.stringify(body);
+
+  test("without a token nothing is uploaded, edited, deleted or hearted", async () => {
+    const owner = await gameToken(PLAYER);
+    await uploadPrefab(fromGame("/api/prefabs", "POST", owner, form("Game bench")), deps());
+    const before = await prefabOf(t.db, "game-bench");
+    expect(
+      (await uploadPrefab(fromGame("/api/prefabs", "POST", "", form("Sneaky")), deps())).status,
+    ).toBe(401);
+    for (const method of ["PATCH", "DELETE"])
+      expect(
+        (
+          await editPrefab(
+            fromGame("/api/prefabs/game-bench", method, "", json({ name: "Mine now" })),
+            deps(),
+            "game-bench",
+          )
+        ).status,
+      ).toBe(401);
+    expect(
+      (
+        await favoritePrefab(
+          fromGame("/api/prefabs/game-bench/favorite", "PUT", ""),
+          deps(),
+          "game-bench",
+        )
+      ).status,
+    ).toBe(401);
+    expect(await prefabOf(t.db, "game-bench")).toEqual(before);
+    expect((await prefabList(t.db)).map((c) => c.slug)).not.toContain("sneaky");
+  });
+
+  test("an upload is credited to the ticket's player, whatever the form says", async () => {
+    const token = await gameToken(PLAYER);
+    const body = form("Credited bench");
+    body.set("uploader", OTHER);
+    const r = await uploadPrefab(fromGame("/api/prefabs", "POST", token, body), deps());
+    expect(r.status).toBe(201);
+    expect((await prefabOf(t.db, "credited-bench"))?.uploader.steamId).toBe(PLAYER);
+  });
+
+  test("the player edits and deletes their own, and nobody else's", async () => {
+    const mine = await gameToken(PLAYER);
+    const theirs = await gameToken(OTHER);
+    await uploadPrefab(fromGame("/api/prefabs", "POST", theirs, form("Their bench")), deps());
+    const edit = json({ name: "Mine now", description: "", tags: [] });
+    for (const [method, body] of [
+      ["PATCH", edit],
+      ["DELETE", undefined],
+    ] as const)
+      expect(
+        (
+          await editPrefab(
+            fromGame("/api/prefabs/their-bench", method, mine, body),
+            deps(),
+            "their-bench",
+          )
+        ).status,
+      ).toBe(403);
+    expect(await prefabOf(t.db, "their-bench")).toMatchObject({
+      name: "Their bench",
+      state: "live",
+    });
+    // their own: renamed, then deleted
+    expect(
+      (
+        await editPrefab(
+          fromGame("/api/prefabs/game-bench", "PATCH", mine, edit),
+          deps(),
+          "game-bench",
+        )
+      ).status,
+    ).toBe(200);
+    expect((await prefabOf(t.db, "game-bench"))?.name).toBe("Mine now");
+    expect(
+      (await editPrefab(fromGame("/api/prefabs/game-bench", "DELETE", mine), deps(), "game-bench"))
+        .status,
+    ).toBe(200);
+    expect((await prefabOf(t.db, "game-bench"))?.state).toBe("deleted");
+  });
+
+  test("the upload quota reads the token", async () => {
+    const id = "76561199000000063";
+    const token = await gameToken(id);
+    await uploadPrefab(fromGame("/api/prefabs", "POST", token, form("Quota bench")), deps());
+    expect(
+      await (await uploadQuota(fromGame("/api/prefabs", "GET", token), deps())).json(),
+    ).toEqual({
+      signedIn: true,
+      banned: false,
+      left: 4,
+      limit: 5,
+      nextAt: null,
+    });
+  });
+
+  test("a token can't reach the admin's take-down, ban or limits, not even the admin's own", async () => {
+    for (const token of [await gameToken(PLAYER), await gameToken(ADMIN_STEAM_ID)]) {
+      expect(
+        (
+          await takeDownPrefab(
+            fromGame("/api/prefabs/their-bench/takedown", "POST", token),
+            deps(),
+            "their-bench",
+          )
+        ).status,
+      ).toBe(401);
+      expect(
+        (await banUploader(fromGame(`/api/prefab-bans/${OTHER}`, "PUT", token), deps(), OTHER))
+          .status,
+      ).toBe(401);
+      for (const [method, body] of [
+        ["GET", undefined],
+        ["PUT", json({ perHour: 1000 })],
+        ["DELETE", undefined],
+      ] as const) {
+        expect(
+          (
+            await limitUploader(
+              fromGame(`/api/prefab-limits/${PLAYER}`, method, token, body),
+              deps(),
+              PLAYER,
+            )
+          ).status,
+        ).toBe(401);
+        // checked after each, so a DELETE later can't hide a PUT that landed
+        const { rows } = await t.db.execute(
+          sql`select count(*)::int as n from prefab_limits where steam_id = ${PLAYER}`,
+        );
+        expect(rows[0]).toEqual({ n: 0 });
+      }
+    }
+    expect((await prefabOf(t.db, "their-bench"))?.state).toBe("live");
   });
 });
 
