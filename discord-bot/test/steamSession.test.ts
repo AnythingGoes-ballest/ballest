@@ -42,7 +42,21 @@ class FakeClient extends EventEmitter {
     const reply = res.fromObject({
       eresult: 1,
       leaderboard_entry_count: 145,
-      entries: [{ steam_id_user: "76561198000000001", global_rank: 1, score: 1_234_567 }],
+      entries: [
+        {
+          steam_id_user: "76561198000000001",
+          global_rank: 1,
+          score: 1_234_567,
+          ugc_id: "1234567890123456789",
+        },
+        // No Ghost attached: Steam's invalid UGC handle.
+        {
+          steam_id_user: "76561198000000002",
+          global_rank: 2,
+          score: 1_300_000,
+          ugc_id: "18446744073709551615",
+        },
+      ],
     });
     callback(Buffer.from(res.encode(reply).finish()));
   }
@@ -77,7 +91,15 @@ describe("the Steam session", () => {
     Effect.gen(function* () {
       const { s } = yield* session;
       const entries = yield* s.players(1, ["76561198000000001"]);
-      expect(entries).toEqual([{ steamId: "76561198000000001", globalRank: 1, score: 1_234_567 }]);
+      expect(entries).toEqual([
+        {
+          steamId: "76561198000000001",
+          globalRank: 1,
+          score: 1_234_567,
+          ugcId: "1234567890123456789",
+        },
+        { steamId: "76561198000000002", globalRank: 2, score: 1_300_000, ugcId: null },
+      ]);
     }).pipe(Effect.provide(config)),
   );
 
@@ -86,7 +108,15 @@ describe("the Steam session", () => {
       const { s } = yield* session;
       expect(yield* s.range(1, 1, 3)).toEqual({
         count: 145,
-        entries: [{ steamId: "76561198000000001", globalRank: 1, score: 1_234_567 }],
+        entries: [
+          {
+            steamId: "76561198000000001",
+            globalRank: 1,
+            score: 1_234_567,
+            ugcId: "1234567890123456789",
+          },
+          { steamId: "76561198000000002", globalRank: 2, score: 1_300_000, ugcId: null },
+        ],
       });
     }).pipe(Effect.provide(config)),
   );
@@ -107,7 +137,7 @@ describe("the Steam session", () => {
       expect(clients[0]!.loggedOff).toBe(true);
 
       // Reads go to the fresh client, and Steam answers again.
-      expect(yield* s.players(1, ["a"])).toHaveLength(1);
+      expect(yield* s.players(1, ["a"])).toHaveLength(2);
     }).pipe(Effect.provide(config)),
   );
 
@@ -141,7 +171,7 @@ describe("the Steam session", () => {
       expect(clients).toHaveLength(2);
       yield* TestClock.adjust(FRESH_LOGON_AFTER_MS);
       expect(clients).toHaveLength(3);
-      expect(yield* s.players(1, ["a"])).toHaveLength(1);
+      expect(yield* s.players(1, ["a"])).toHaveLength(2);
     }).pipe(Effect.provide(config)),
   );
 
@@ -162,7 +192,7 @@ describe("the Steam session", () => {
       clients[0]!.dead = true;
       yield* readThroughTimeouts(s.players(1, ["a"]));
       clients[0]!.dead = false;
-      expect(yield* s.players(1, ["a"])).toHaveLength(1);
+      expect(yield* s.players(1, ["a"])).toHaveLength(2);
       // The answer cleared the clock, so a later failure starts it afresh.
       yield* TestClock.adjust(FRESH_LOGON_AFTER_MS * 2);
       clients[0]!.dead = true;

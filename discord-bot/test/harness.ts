@@ -4,6 +4,7 @@ import { Context, type Duration, Effect, Exit, Layer, Option, Ref, Scope, TestCl
 import type { DrawnMap, Link, MapInfo, Medals, VenueName } from "../src/domain.js";
 import { HOME_VENUE, SCORE_TICKS_PER_SECOND } from "../src/domain.js";
 import { Engine } from "../src/engine.js";
+import { GhostDates, GhostUnavailable } from "../src/steam/ghosts.js";
 import { SqliteStoreInMemory } from "../src/sqliteStore.js";
 import { Pings } from "../src/pings.js";
 import {
@@ -48,8 +49,20 @@ export const makeMap = (boardId: number | null, over: Partial<FakeMap> = {}): Fa
 // ---------------------------------------------------------------- Steam
 
 export interface FakeSteamControl {
-  /** Put (or improve) a time on a board, as if a Player just finished a run. */
-  readonly setTime: (boardId: number, steamId: string, seconds: number) => Effect.Effect<void>;
+  /**
+   * Put (or improve) a time on a board, as if a Player just finished a run; given `ghostAt` (ms),
+   * the run uploads a Ghost stamped then, which `ghosts` dates.
+   */
+  readonly setTime: (
+    boardId: number,
+    steamId: string,
+    seconds: number,
+    ghostAt?: number,
+  ) => Effect.Effect<void>;
+  /** While set, every Ghost read fails as if Steam's file host refused, or never answers. */
+  readonly failGhosts: (fail: boolean | "hang") => Effect.Effect<void>;
+  /** How many Ghosts have been read so far. */
+  readonly ghostReads: () => number;
   /** The next n per-player reads fail as if Steam dropped the reply. */
   readonly failNextReads: (n: number) => Effect.Effect<void>;
   readonly setCatalogue: (maps: ReadonlyArray<FakeMap>) => Effect.Effect<void>;
@@ -62,6 +75,12 @@ export interface FakeSteamControl {
 export const makeFakeSteam = (profiles: Record<string, ProfilePreview>) =>
   Effect.gen(function* () {
     const boards = yield* Ref.make(new Map<number, Map<string, number>>());
+    /** Each board's Ghosts, by player: the UGC id of their time's replay. */
+    const ghostIds = new Map<string, string>();
+    /** Each Ghost's stamp, by UGC id. */
+    const stamps = new Map<string, number>();
+    let ghostsDown: boolean | "hang" = false;
+    let ghostReads = 0;
     const failures = yield* Ref.make(0);
     const catalogue = yield* Ref.make<ReadonlyArray<FakeMap>>([]);
     const readDelay = yield* Ref.make<Duration.DurationInput>(0);
@@ -76,7 +95,8 @@ export const makeFakeSteam = (profiles: Record<string, ProfilePreview>) =>
         const board = (yield* Ref.get(boards)).get(boardId) ?? new Map<string, number>();
         return steamIds.flatMap((steamId) => {
           const t = board.get(steamId);
-          return t === undefined ? [] : [{ steamId, ticks: t }];
+          const ugcId = ghostIds.get(`${boardId} ${steamId}`);
+          return t === undefined ? [] : [{ steamId, ticks: t, ...(ugcId ? { ugcId } : {}) }];
         });
       });
     const port = Steam.of({
@@ -101,18 +121,40 @@ export const makeFakeSteam = (profiles: Record<string, ProfilePreview>) =>
       },
     });
     const control: FakeSteamControl = {
-      setTime: (boardId, steamId, seconds) =>
+      setTime: (boardId, steamId, seconds, ghostAt) =>
         Ref.update(boards, (all) => {
+          const key = `${boardId} ${steamId}`;
+          if (ghostAt === undefined) ghostIds.delete(key);
+          else {
+            const ugcId = `ghost-${stamps.size + 1}`;
+            stamps.set(ugcId, ghostAt);
+            ghostIds.set(key, ugcId);
+          }
           const next = new Map(all);
           next.set(boardId, new Map(all.get(boardId) ?? []).set(steamId, ticks(seconds)));
           return next;
         }),
+      failGhosts: (fail) =>
+        Effect.sync(() => {
+          ghostsDown = fail;
+        }),
+      ghostReads: () => ghostReads,
       failNextReads: (n) => Ref.set(failures, n),
       setCatalogue: (maps) => Ref.set(catalogue, maps),
       setReadDelay: (delay) => Ref.set(readDelay, delay),
       reads: Ref.get(readCount),
     };
-    return { port, control };
+    const ghosts = GhostDates.of({
+      setAt: (ugcId) =>
+        Effect.suspend(() => {
+          ghostReads++;
+          if (ghostsDown === "hang") return Effect.never;
+          return ghostsDown
+            ? Effect.fail(new GhostUnavailable({ reason: "file host down" }))
+            : Effect.succeed(Option.fromNullable(stamps.get(ugcId)));
+        }),
+    });
+    return { port, control, ghosts };
   });
 
 // ---------------------------------------------------------------- Surface

@@ -18,7 +18,8 @@ import {
   threadName,
   threadSections,
 } from "./messages.js";
-import { GhostDatesLive, oldestMapRecords, oldestTrackRecords } from "./records.js";
+import { GhostDatesLive } from "../steam/ghosts.js";
+import { oldestMapRecords, oldestTrackRecords } from "./records.js";
 import { buildReport, DAY_MS, type Report } from "./report.js";
 import { ReportSource, ReportSourceLive } from "./source.js";
 import { StandingsSource, StandingsSourceLive } from "./standings.js";

@@ -30,6 +30,8 @@ export class ProfileNotFound extends Data.TaggedError("ProfileNotFound")<{
 export interface Entry {
   readonly steamId: string;
   readonly ticks: number;
+  /** The run's Ghost replay (a UGC id), when the read says which; see steam/ghosts.ts. */
+  readonly ugcId?: string;
 }
 
 /** What a candidate Map's board says, for the Eligible Map check. */

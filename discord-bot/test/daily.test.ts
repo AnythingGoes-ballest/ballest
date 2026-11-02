@@ -6,7 +6,7 @@ import { NoChosenSkins } from "../src/chosenSkins.js";
 import { Renderer } from "../src/render/renderer.js";
 import { ReportChannel, ReportPostFailed, ThreadPostFailed } from "../src/report/channel.js";
 import { dailyLoop, ReportLogLive } from "../src/report/daily.js";
-import { GhostDates } from "../src/report/records.js";
+import { GhostDates } from "../src/steam/ghosts.js";
 import { DAY_MS } from "../src/report/report.js";
 import { ReportDataUnavailable, ReportSource } from "../src/report/source.js";
 import { StandingsSource } from "../src/report/standings.js";

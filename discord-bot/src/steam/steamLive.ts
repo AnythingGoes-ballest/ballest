@@ -95,9 +95,15 @@ const make = Effect.gen(function* () {
     }),
 
     readPlayers: Effect.fn("Steam.readPlayers")(function* (boardId, steamIds) {
-      return yield* session
-        .players(boardId, steamIds)
-        .pipe(Effect.map((es) => es.map((e) => ({ steamId: e.steamId, ticks: e.score }))));
+      return yield* session.players(boardId, steamIds).pipe(
+        Effect.map((es) =>
+          es.map((e) => ({
+            steamId: e.steamId,
+            ticks: e.score,
+            ...(e.ugcId === null ? {} : { ugcId: e.ugcId }),
+          })),
+        ),
+      );
     }),
 
     resolveProfile: Effect.fn("Steam.resolveProfile")(function* (input) {

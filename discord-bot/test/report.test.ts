@@ -7,12 +7,8 @@ import {
   standingsImage,
   threadSections,
 } from "../src/report/messages.js";
-import {
-  GhostDates,
-  GhostUnavailable,
-  oldestMapRecords,
-  parseGhostStamp,
-} from "../src/report/records.js";
+import { oldestMapRecords } from "../src/report/records.js";
+import { GhostDates, GhostUnavailable, parseGhostStamp } from "../src/steam/ghosts.js";
 import {
   buildReport,
   DAY_MS,

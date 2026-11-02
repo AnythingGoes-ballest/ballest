@@ -324,8 +324,9 @@ is raced on.
 _Avoid_: track (a Track is a Circuit board)
 
 **Flag**:
-A PB first seen more than 30 minutes after the first counted time the bot saw from that Entrant
-on that Cup Map (reads are 5 minutes apart, so it is approximate). It still counts; the bot tells
-the ops channel, once per Entrant per Map, to follow up by hand.
+A PB set more than 30 minutes after the Entrant's first counted time on that Cup Map. Both runs
+are dated by their Ghosts, to the second; when either Ghost gives no date, by the reads that saw
+them instead (5 minutes apart, so approximate, and the Flag says which). It still counts; the bot
+tells the ops channel, once per Entrant per Map, to follow up by hand.
 
 _Avoid_: strike, violation

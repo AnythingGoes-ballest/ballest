@@ -32,6 +32,7 @@ const TimeRow = Schema.Struct({
   discord_id: Schema.String,
   ticks: Schema.Number,
   first_at: Schema.Number,
+  first_set_at: Schema.NullOr(Schema.Number),
   seen_at: Schema.Number,
   flagged: Schema.Number,
 });
@@ -88,6 +89,8 @@ export interface CupTime {
   readonly ticks: number;
   /** When their first counted time on this Map was seen. */
   readonly firstAt: number;
+  /** When that first time was set, by its Ghost; null when the Ghost gave no date. */
+  readonly firstSetAt: number | null;
   /** When this one was. */
   readonly seenAt: number;
   /** Whether a Flag was told for them on this Map. */
@@ -299,7 +302,7 @@ export const CupLogLive = Layer.effect(
       }),
       times: Effect.fn("CupLog.times")(function* (guildId: string, week: string) {
         const rows =
-          yield* sql`SELECT pfid, discord_id, ticks, first_at, seen_at, flagged FROM weekly_cup_times WHERE guild_id = ${guildId} AND week = ${week}`.pipe(
+          yield* sql`SELECT pfid, discord_id, ticks, first_at, first_set_at, seen_at, flagged FROM weekly_cup_times WHERE guild_id = ${guildId} AND week = ${week}`.pipe(
             Effect.flatMap(Schema.decodeUnknown(Schema.Array(TimeRow))),
             Effect.orDie,
           );
@@ -308,12 +311,13 @@ export const CupLogLive = Layer.effect(
           discordId: r.discord_id,
           ticks: r.ticks,
           firstAt: r.first_at,
+          firstSetAt: r.first_set_at,
           seenAt: r.seen_at,
           flagged: r.flagged !== 0,
         }));
       }),
       putTime: Effect.fn("CupLog.putTime")(function* (guildId: string, week: string, t: CupTime) {
-        yield* sql`INSERT OR REPLACE INTO weekly_cup_times (guild_id, week, pfid, discord_id, ticks, first_at, seen_at, flagged) VALUES (${guildId}, ${week}, ${t.pfid}, ${t.discordId}, ${t.ticks}, ${t.firstAt}, ${t.seenAt}, ${t.flagged ? 1 : 0})`.pipe(
+        yield* sql`INSERT OR REPLACE INTO weekly_cup_times (guild_id, week, pfid, discord_id, ticks, first_at, first_set_at, seen_at, flagged) VALUES (${guildId}, ${week}, ${t.pfid}, ${t.discordId}, ${t.ticks}, ${t.firstAt}, ${t.firstSetAt}, ${t.seenAt}, ${t.flagged ? 1 : 0})`.pipe(
           Effect.orDie,
         );
       }),

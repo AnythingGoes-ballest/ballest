@@ -546,9 +546,11 @@ PBs on the Cup Maps as racing opens (read once, before the announcement;
 `weekly_cups.bars_at`), or, for one who signs up later, as they sign up (read before they are
 added; Steam down refuses the sign-up, to try again). A time counts once it beats the bar, so
 practice on the Shortlist during the vote counts not. Each counted best is kept
-(`weekly_cup_times`) with when the Entrant's first counted time on that Map was seen; a PB seen
-more than 30 minutes after that is a Flag (approximate: both are measured between reads), told
-to ops once per Entrant per Map (`flagged`), and still counts. A failed read keeps that Map's
+(`weekly_cup_times`) with when the Entrant's first counted time on that Map was seen, and when it
+was set by its Ghost (`first_set_at`, `src/steam/ghosts.ts`); a PB set more than 30 minutes after
+that is a Flag, timed between the two Ghosts when both give a date that could be their run's, else
+between the reads that saw them (approximate, and the Flag says so), told to ops once per Entrant
+per Map (`flagged`), and still counts. A failed read keeps that Map's
 last times, ops told once until the reads land, and the next tick reads again.
 `points.ts` ranks each Map (equal times share a place), pays the site's `trackPoints` (pinned by
 `test/weeklyCupPoints.test.ts`, which imports `web/lib/rules.ts`), totals them and breaks a tie

@@ -10,7 +10,7 @@ import { Clock, Effect, Layer } from "effect";
 import { ChosenSkinsLive } from "../src/chosenSkins.js";
 import { ReportChannelLive } from "../src/report/channel.js";
 import { postReport } from "../src/report/daily.js";
-import { GhostDatesLive } from "../src/report/records.js";
+import { GhostDatesLive } from "../src/steam/ghosts.js";
 import { buildReport, DAY_MS } from "../src/report/report.js";
 import { ReportSource, ReportSourceLive } from "../src/report/source.js";
 import { StandingsSource, StandingsSourceLive } from "../src/report/standings.js";

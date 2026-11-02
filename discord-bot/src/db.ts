@@ -189,6 +189,12 @@ const MIGRATIONS: Migrations = {
         PRIMARY KEY (guild_id, week, pfid, discord_id)
       )`;
   }),
+  // When each Entrant's first counted time on a Cup Map was set, by its Ghost, or null when its
+  // Ghost gave no date: a Flag then times the runs themselves rather than the reads.
+  "0017_weekly_cup_first_set_at": Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`ALTER TABLE weekly_cup_times ADD COLUMN first_set_at INTEGER`;
+  }),
 };
 
 /** The migrations a build had before the one with this id (`"0010"`): tests start a database from an older build. */

@@ -23,6 +23,7 @@ import { OpsAlerts } from "../ops.js";
 import { Steam, Store } from "../ports.js";
 import { MapPreviews } from "../previews.js";
 import { Renderer } from "../render/renderer.js";
+import { GhostDates, GhostDatesLive } from "../steam/ghosts.js";
 import { keepCupChannel } from "./channel.js";
 import { CupChannel, CupLinks } from "./model.js";
 import type { CupPresses } from "./presses.js";
@@ -93,6 +94,7 @@ const make = Effect.gen(function* () {
   const log = yield* CupLog;
   const alerts = yield* OpsAlerts;
   const steam = yield* Steam;
+  const ghosts = yield* GhostDates;
   const previews = yield* MapPreviews;
   const store = yield* Store;
   const renderer = yield* Renderer;
@@ -130,6 +132,7 @@ const make = Effect.gen(function* () {
       Effect.provideService(OpsAlerts, alerts),
       Effect.provideService(CupLinks, links),
       Effect.provideService(Steam, steam),
+      Effect.provideService(GhostDates, ghosts),
       Effect.provideService(MapPreviews, previews),
     );
     yield* Ref.update(running, (m) => new Map(m).set(guildId, cup));
@@ -165,4 +168,5 @@ export const WeeklyCupsLive = Layer.scoped(WeeklyCups, make).pipe(
   Layer.provide(CupLogLive),
   Layer.provide(MigratorLive),
   Layer.provide(OpsAlerts.Default),
+  Layer.provide(GhostDatesLive),
 );

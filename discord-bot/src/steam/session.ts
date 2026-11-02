@@ -43,6 +43,8 @@ const EntriesResponse = Schema.Struct({
       steam_id_user: Schema.String,
       global_rank: Schema.Number,
       score: Schema.Number,
+      /** The run's Ghost (a UGC handle, as a decimal string), or an invalid handle for none. */
+      ugc_id: Schema.String,
     }),
   ),
 });
@@ -52,7 +54,12 @@ export interface BoardEntry {
   readonly globalRank: number;
   /** Run time in hundred-thousandths of a second (SCORE_TICKS_PER_SECOND). */
   readonly score: number;
+  /** The run's Ghost replay, as a UGC id, or null when none is attached. */
+  readonly ugcId: string | null;
 }
+
+/** Steam's "no file" UGC handles: unset (0) and k_UGCHandleInvalid (all ones). */
+const NO_UGC = new Set(["0", "18446744073709551615"]);
 
 class NoReply extends Data.TaggedError("NoReply") {}
 
@@ -277,6 +284,7 @@ export const makeSteamSession = Effect.fn("SteamSession.make")(function* (
           steamId: e.steam_id_user,
           globalRank: e.global_rank,
           score: e.score,
+          ugcId: NO_UGC.has(e.ugc_id) ? null : e.ugc_id,
         })),
       })),
     );

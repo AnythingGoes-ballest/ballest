@@ -1,19 +1,23 @@
 // The Weekly Cup's racing (spec #353, #358): from Friday 09:00 each Cup Map is read every 5
 // minutes, one readPlayers call per Map for the current Entrants; a time counts once it beats the
 // Entrant's bar (their PB as racing opened, or as they signed up if later) and their counted best,
-// and a PB seen more than 30 minutes after their first counted time on that Map is a Flag, told to
-// ops once per Entrant per Map. The standings are shown after each read; at Sunday 20:00 a final
+// and a PB set more than 30 minutes after their first counted time on that Map is a Flag, told to
+// ops once per Entrant per Map: timed by the two runs' Ghosts when both give a date, else by the
+// reads that saw them. The standings are shown after each read; at Sunday 20:00 a final
 // read of each Map (tried each minute for the ones Steam missed, up to 30 minutes) makes the
 // results, posted once, and the live standings then say racing has closed.
 import { Effect, Option } from "effect";
 import { formatTime } from "../domain.js";
 import { mapName } from "../links.js";
+import { GhostUnavailable } from "../steam/ghosts.js";
 import type { SteamUnavailable } from "../ports.js";
 import type { CupKit } from "./kit.js";
 import {
   type CupMap,
   FINAL_WAIT,
   FLAG_AFTER,
+  GHOST_CLOCK_SLACK,
+  GHOST_READ_TIMEOUT,
   LATE_READ_AFTER,
   READ_EVERY,
   RETRY_EVERY,
@@ -34,8 +38,107 @@ interface Account {
   readonly steamId: string;
 }
 
+/** How far apart an Entrant's first counted time on a Map and their new PB there were. */
+interface FlagGap {
+  readonly ms: number;
+  /** Between the two runs' Ghost dates; otherwise between the reads that first saw each. */
+  readonly byGhosts: boolean;
+}
+
+/**
+ * The gap a Flag is judged on: between the runs themselves when both Ghosts gave a date, else
+ * between the reads that saw them, which can each be up to a read gap (5 minutes, longer while
+ * Steam is down) after the run; ops follows that kind up by hand.
+ */
+const flagGap = (
+  first: Pick<CupTime, "firstAt" | "firstSetAt">,
+  setAt: Option.Option<number>,
+  now: number,
+): FlagGap =>
+  first.firstSetAt !== null && Option.isSome(setAt)
+    ? { ms: setAt.value - first.firstSetAt, byGhosts: true }
+    : { ms: now - first.firstAt, byGhosts: false };
+
+/** "30 min 30 s" between Ghosts, to the second; "about 35 minutes" between reads. */
+const describeGap = (gap: FlagGap) => {
+  const seconds = Math.floor(gap.ms / 1000);
+  return gap.byGhosts
+    ? `${Math.floor(seconds / 60)} min ${seconds % 60} s`
+    : `about ${Math.floor(seconds / 60)} minutes`;
+};
+
 export const makeRace = (kit: CupKit) => {
-  const { guildId, log, steam, links } = kit;
+  const { guildId, log, steam, ghosts, links } = kit;
+
+  /**
+   * When each Cup Map's last read landed, so a new time's run is known to be set after it; lost on
+   * a restart, when the time it beat bounds it instead.
+   */
+  const lastReads = new Map<string, number>();
+
+  /**
+   * When a run first seen `now` was set, by its Ghost: none when the entry has no Ghost, the read
+   * fails or takes over GHOST_READ_TIMEOUT, or its date can't be this run's. A Ghost is attached
+   * after its score lands, so a read can still see the old run's; this run was set after `after`
+   * (the last read that didn't show it), and not after `now`, give or take a second for the
+   * stamp's rounding and GHOST_CLOCK_SLACK on the late side for the player's PC clock.
+   */
+  const setAtOf = Effect.fn("WeeklyCup.setAtOf")(function* (
+    ugcId: string | undefined,
+    after: number,
+    now: number,
+  ) {
+    if (ugcId === undefined) return Option.none<number>();
+    const at = yield* ghosts.setAt(ugcId).pipe(
+      Effect.timeoutFail({
+        duration: GHOST_READ_TIMEOUT,
+        onTimeout: () => new GhostUnavailable({ reason: "timed out" }),
+      }),
+      Effect.catchTag("GhostUnavailable", (e) =>
+        Effect.logWarning(`weekly cup: no date for a Ghost (${e.reason})`).pipe(
+          Effect.as(Option.none<number>()),
+        ),
+      ),
+    );
+    return Option.filter(at, (a) => a > after - 1000 && a <= now + GHOST_CLOCK_SLACK);
+  });
+
+  /**
+   * An Entrant's new counted time on a Map, first seen `now` (set after `after`), over their
+   * counted best before it, if any: with the gap that makes it a Flag, or null when it isn't one.
+   * Its Ghost is read for a first time, to date it, and for a PB only when its date could make a
+   * Flag.
+   */
+  const counted = Effect.fn("WeeklyCup.counted")(function* (
+    entry: Baseline & { readonly ugcId?: string },
+    before: CupTime | undefined,
+    after: number,
+    now: number,
+  ) {
+    const fresh = { pfid: entry.pfid, discordId: entry.discordId, ticks: entry.ticks, seenAt: now };
+    if (before === undefined) {
+      const firstSetAt = Option.getOrNull(yield* setAtOf(entry.ugcId, after, now));
+      const time: CupTime = { ...fresh, firstAt: now, firstSetAt, flagged: false };
+      return { time, flag: null };
+    }
+    const gap = before.flagged
+      ? null
+      : flagGap(
+          before,
+          before.firstSetAt === null || now + GHOST_CLOCK_SLACK - before.firstSetAt <= FLAG_AFTER
+            ? Option.none()
+            : yield* setAtOf(entry.ugcId, after, now),
+          now,
+        );
+    const flag = gap !== null && gap.ms > FLAG_AFTER ? gap : null;
+    const time: CupTime = {
+      ...fresh,
+      firstAt: before.firstAt,
+      firstSetAt: before.firstSetAt,
+      flagged: before.flagged || flag !== null,
+    };
+    return { time, flag };
+  });
 
   /** The week's Cup Maps in rank order, each with its votes; none before the vote closes. */
   const cupMapsOf = Effect.fn("WeeklyCup.cupMapsOf")(function* (week: string) {
@@ -74,9 +177,11 @@ export const makeRace = (kit: CupKit) => {
       map.boardId,
       accounts.map((a) => a.steamId),
     );
-    return entries.flatMap((e): Array<Baseline> => {
+    return entries.flatMap((e): Array<Baseline & { readonly ugcId?: string }> => {
       const discordId = byAccount.get(e.steamId);
-      return discordId === undefined ? [] : [{ pfid: map.pfid, discordId, ticks: e.ticks }];
+      if (discordId === undefined) return [];
+      const entry = { pfid: map.pfid, discordId, ticks: e.ticks };
+      return [e.ugcId === undefined ? entry : { ...entry, ugcId: e.ugcId }];
     });
   });
 
@@ -98,8 +203,11 @@ export const makeRace = (kit: CupKit) => {
     now: number,
     week: CupWeek,
     race: Race,
+    barsAt: number | null,
   ) {
-    const accounts = yield* accountsOf(yield* kit.entrantIds(week.week));
+    const entrants = yield* log.entrants(guildId, week.week);
+    const signedUpAt = new Map(entrants.map((e) => [e.discordId, e.signedUpAt]));
+    const accounts = yield* accountsOf(entrants.map((e) => e.discordId));
     const held = new Map(
       (yield* log.times(guildId, week.week)).map((t) => [`${t.pfid} ${t.discordId}`, t]),
     );
@@ -118,23 +226,24 @@ export const makeRace = (kit: CupKit) => {
         const before = held.get(key);
         if (bar !== undefined && entry.ticks >= bar.ticks) continue;
         if (before !== undefined && entry.ticks >= before.ticks) continue;
-        // Measured between reads, not runs: the first counted time was set up to a read gap
-        // (5 minutes, longer while Steam is down) before it was seen, and so was this one, so a
-        // Flag is approximate either way; ops follows it up by hand.
-        const flag = before !== undefined && !before.flagged && now - before.firstAt > FLAG_AFTER;
-        const time: CupTime = {
-          ...entry,
-          firstAt: before?.firstAt ?? now,
-          seenAt: now,
-          flagged: (before?.flagged ?? false) || flag,
-        };
+        const lastRead = lastReads.get(map.pfid) ?? 0;
+        // A first counted time beats the bar, taken as racing opened or as they signed up.
+        const { time, flag } = yield* counted(
+          entry,
+          before,
+          before === undefined
+            ? Math.max(barsAt ?? week.voteClosesAt, signedUpAt.get(entry.discordId) ?? 0, lastRead)
+            : Math.max(before.seenAt, lastRead),
+          now,
+        );
         yield* log.putTime(guildId, week.week, time);
         held.set(key, time);
-        if (before !== undefined && flag)
+        if (flag !== null)
           yield* kit.alerts.post(
-            `Weekly Cup Flag for ${week.week} in ${guildId}: <@${entry.discordId}> set ${formatTime(entry.ticks)} on ${mapName(map)}, ${Math.floor((now - before.firstAt) / 60_000)} minutes after their first time on it. It still counts.`,
+            `Weekly Cup Flag for ${week.week} in ${guildId}: <@${entry.discordId}> set ${formatTime(entry.ticks)} on ${mapName(map)}, ${describeGap(flag)} after their first time on it, ${flag.byGhosts ? "by their Ghosts" : "by the bot's reads"}. It still counts.`,
           );
       }
+      lastReads.set(map.pfid, now);
     }
     yield* kit.attempt(
       "read",
@@ -176,7 +285,7 @@ export const makeRace = (kit: CupKit) => {
   /** Racing: read the Cup Maps, show the standings, and read again in 5 minutes. */
   const live = Effect.fn("WeeklyCup.live")(function* (now: number, week: CupWeek, cup: CupRecord) {
     const race = yield* raceOf(week.week);
-    yield* readTimes(now, week, race);
+    yield* readTimes(now, week, race, cup.barsAt);
     const view = yield* standingsOf(week, race, false);
     yield* kit.show(week, cup, "standings", view, "update the Weekly Cup's standings");
     return Math.min(now + READ_EVERY, week.endsAt);
@@ -198,7 +307,9 @@ export const makeRace = (kit: CupKit) => {
       const race = yield* raceOf(week.week);
       const missing = race.maps.filter((m) => current.finalReads[m.pfid] === undefined);
       const landed =
-        missing.length === 0 ? [] : yield* readTimes(now, week, { ...race, maps: missing });
+        missing.length === 0
+          ? []
+          : yield* readTimes(now, week, { ...race, maps: missing }, current.barsAt);
       if (landed.length > 0) {
         const finalReads = { ...current.finalReads };
         for (const pfid of landed) finalReads[pfid] = now;
