@@ -10,6 +10,10 @@ export interface Preview {
   readonly body: Uint8Array;
 }
 
+/** A preview as the renderer draws it: a data URI. */
+export const previewUri = (p: Preview) =>
+  `data:${p.type};base64,${Buffer.from(p.body).toString("base64")}`;
+
 /** Steam's image host wouldn't give a preview it can use. */
 export class PreviewUnavailable extends Data.TaggedError("PreviewUnavailable")<{
   readonly reason: string;

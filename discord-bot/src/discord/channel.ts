@@ -4,7 +4,7 @@
 import { Context, Data, Effect, ExecutionStrategy, Layer, Option, Scope } from "effect";
 import type { MapInfo, VenueName } from "../domain.js";
 import type { CardView, KeptReason, ThreadPost } from "../ports.js";
-import { MapPreviews } from "../previews.js";
+import { MapPreviews, previewUri } from "../previews.js";
 import { Renderer, RenderError } from "../render/renderer.js";
 import {
   Discord,
@@ -138,9 +138,7 @@ const discordChannel = Effect.fn("Channel.make")(function* (venue: DiscordVenue)
   const previewOf = Effect.fn("Channel.previewOf")(function* (map: MapInfo | null) {
     if (map === null) return null;
     const preview = yield* previews.of(map.previewUrl);
-    return Option.getOrNull(
-      Option.map(preview, (p) => `data:${p.type};base64,${Buffer.from(p.body).toString("base64")}`),
-    );
+    return Option.getOrNull(Option.map(preview, previewUri));
   });
 
   const drawCard = Effect.fn("Channel.drawCard")(function* (view: CardView) {

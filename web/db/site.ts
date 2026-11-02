@@ -25,10 +25,12 @@ import type {
   DailyCell,
   DailyDay,
   DailyFinish,
+  DailyWin,
   DailyStandings,
   DerivedStanding,
   DerivedStandings,
   Freshness,
+  LatestDaily,
   NameHit,
   Placing,
   PlayerDailies,
@@ -672,6 +674,59 @@ export async function dailyStandings(db: Db): Promise<DailyStandings> {
     final.map((r) => r.date),
     finishes,
   );
+}
+
+/* Each final Daily's 1st, ranked as dailyStandings ranks them, with when its final Refresh
+   finished (Unix ms): the Daily wins GET /api/standings counts (withDaily in
+   lib/workshop-standings.ts) */
+export async function dailyWins(db: Db): Promise<Array<DailyWin>> {
+  return rows<DailyWin>(
+    db,
+    sql`select r.steam_id as "steamId", ${personaSql} as persona,
+        (extract(epoch from coalesce(f.finished_at, f.started_at)) * 1000)::float8 as "finalAt"
+      from (${rankedSql(sql`e.board in (select board from dailies where final_refresh is not null)`)}) r
+      join dailies d on d.board = r.board
+      join refreshes f on f.id = d.final_refresh
+      join players p on p.steam_id = r.steam_id
+      where r.rank = 1
+      order by d.date`,
+  );
+}
+
+/* The newest final Daily (by date) with at least one open Entry, with its Map as dailyDay reads
+   it, its player count and its top 10 as its board ranks it, or null when there is none (a
+   final Daily whose board closed down to nobody is passed over): the Daily Report's
+   yesterday's Daily (withDaily in lib/workshop-standings.ts) */
+export async function latestDaily(db: Db): Promise<LatestDaily | null> {
+  const found = await rows<Omit<LatestDaily, "top">>(
+    db,
+    sql`select d.date::text as date, d.title, l.preview,
+        (select count(*) from entries e
+          where e.board = d.board and e.closed_refresh is null)::int as players
+      from dailies d
+      ${dailyMapSql}
+      where d.final_refresh is not null
+        and exists (select 1 from entries e where e.board = d.board and e.closed_refresh is null)
+      order by d.date desc limit 1`,
+  );
+  const day = found.at(0);
+  if (!day) return null;
+  const top = await rows<{ steamId: string; persona: string; score: number; rank: number }>(
+    db,
+    sql`select r.steam_id as "steamId", ${personaSql} as persona, r.score::float8 as score, r.rank
+      from (${rankedSql(sql`e.board = (select board from dailies where date = ${day.date}::date)`)}) r
+      join players p on p.steam_id = r.steam_id
+      where r.rank <= 10
+      order by r.rank`,
+  );
+  return {
+    ...day,
+    top: top.map(({ steamId, persona, score, rank }) => ({
+      player: { steamId, persona },
+      score,
+      rank,
+    })),
+  };
 }
 
 /* A player's place on every Daily they have a time on, oldest first, each ranked as its

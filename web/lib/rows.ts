@@ -275,6 +275,40 @@ export interface WorkshopStandings {
   lists: Record<StandingsStat, Array<WorkshopStandingRow>>;
 }
 
+/* What GET /api/standings serves: the Workshop standings, and beside them the Daily side,
+   which is no Workshop standing (withDaily in lib/workshop-standings.ts). `players`
+   then holds everyone on the Workshop lists or the Daily wins. */
+export interface StandingsPayload extends WorkshopStandings {
+  daily: {
+    /* Most Daily wins: 1st places on final Dailies, as the Daily standings rank them, in
+       the Workshop rows' shape and order (most first, then by Steam ID). A Daily counts at
+       the baseline when its final Refresh had finished by then. */
+    wins: Array<WorkshopStandingRow>;
+    /* the newest final Daily, or null when none is final yet */
+    latest: LatestDaily<number> | null;
+  };
+}
+
+/* The newest final Daily as the Daily Report shows it: its Map's title and Workshop preview
+   (null when no catalogue has a picture), how many players have a time on its board, and
+   its top 10 as that board ranks it, each score in ticks (SCORE_TICKS_PER_SECOND). `P` is
+   who: a player's Steam ID and persona as the database reads it, or an index into
+   StandingsPayload.players as GET /api/standings serves it. */
+export interface LatestDaily<P = { steamId: string; persona: string }> {
+  date: string;
+  title: string;
+  preview: string | null;
+  players: number;
+  top: Array<{ player: P; score: number; rank: number }>;
+}
+
+/* the 1st on one final Daily, and when its final Refresh finished (Unix ms) */
+export interface DailyWin {
+  steamId: string;
+  persona: string;
+  finalAt: number;
+}
+
 export interface DailyStandings {
   /* how many final Dailies are counted, and the first one's date */
   dailies: number;

@@ -6,6 +6,7 @@ import { describe, expect, test } from "vitest";
 import type { StandingsStat } from "../lib/rows";
 import {
   countStandings,
+  withDaily,
   youBaseline,
   type StandingsEntry,
   type StandingsMap,
@@ -197,6 +198,77 @@ describe("listing order", () => {
       ["zed", 2, 2, 1, 1],
       ["amy", 1, 1, 3, 3],
     ]);
+  });
+});
+
+const served = (s: ReturnType<typeof countStandings>) => ({ readAt: null, since: "", ...s });
+
+describe("the Daily wins beside them", () => {
+  test("a winner on no Workshop list joins the players in Steam ID order, the lists kept", () => {
+    const s = served(
+      countStandings([map("A")], [entry("A", "ann", 100), entry("A", "cat", 200)], SINCE),
+    );
+    const w = (steamId: string, finalAt: number) => ({ steamId, persona: "B", finalAt });
+    const got = withDaily(s, [w("bob", BEFORE), w("cat", AFTER), w("bob", AFTER)], null, SINCE);
+    expect(got.players).toEqual([
+      ["ann", "ANN"],
+      ["bob", "B"],
+      ["cat", "CAT"],
+    ]);
+    const as = (rows: typeof got.daily.wins) =>
+      rows.map(([i, ...rest]) => [got.players[i][0], ...rest]);
+    expect(as(got.lists.wr)).toEqual([["ann", 1, 1, 1, 1]]);
+    expect(as(got.lists.played)).toEqual([
+      ["ann", 1, 1, 1, 1],
+      ["cat", 1, 1, 1, 1],
+    ]);
+    // cat's win came after the baseline
+    expect(as(got.daily.wins)).toEqual([
+      ["bob", 2, 1, 1, 1],
+      ["cat", 1, 0, 2, 2],
+    ]);
+  });
+
+  test("level on wins share a place and list by Steam ID", () => {
+    const s = served(countStandings([], [], SINCE));
+    const w = (steamId: string) => ({ steamId, persona: steamId, finalAt: BEFORE });
+    const got = withDaily(s, [w("zed"), w("amy"), w("zed"), w("amy"), w("kim")], null, SINCE);
+    expect(got.daily.wins.map(([i, ...rest]) => [got.players[i][0], ...rest])).toEqual([
+      ["amy", 2, 2, 1, 1],
+      ["zed", 2, 2, 1, 1],
+      ["kim", 1, 1, 3, 3],
+    ]);
+  });
+});
+
+describe("the newest final Daily beside them", () => {
+  test("its top 10 join the players and point at them; none is null", () => {
+    const s = served(countStandings([map("A")], [entry("A", "cat", 200)], SINCE));
+    const top = (steamId: string, score: number, rank: number) => ({
+      player: { steamId, persona: steamId.toUpperCase() },
+      score,
+      rank,
+    });
+    const latest = {
+      date: "2026-09-01",
+      title: "Gully",
+      preview: null,
+      players: 12,
+      top: [top("dan", 1_160_400, 1), top("cat", 1_163_000, 2)],
+    };
+    const got = withDaily(s, [], latest, SINCE);
+    expect(got.players).toEqual([
+      ["cat", "CAT"],
+      ["dan", "DAN"],
+    ]);
+    expect(got.daily.latest).toEqual({
+      ...latest,
+      top: [
+        { player: 1, score: 1_160_400, rank: 1 },
+        { player: 0, score: 1_163_000, rank: 2 },
+      ],
+    });
+    expect(withDaily(s, [], null, SINCE).daily.latest).toBeNull();
   });
 });
 

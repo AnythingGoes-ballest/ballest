@@ -1,6 +1,11 @@
 // GET /api/standings?since=: the Workshop standings (WorkshopStandings in lib/rows.ts), now and
-// at a baseline, with each player's count and shared place on both sides (docs/adr/0011).
-// Multiballs draws the Daily Report's image from them.
+// at a baseline, with each player's count and shared place on both sides (docs/adr/0011), and
+// beside their `lists` the Daily side, `daily` (StandingsPayload in lib/rows.ts): `wins`, Most
+// Daily wins in the same row shape, over final Dailies, and `latest`, the newest final Daily
+// (its date, Map title and preview, player count and top 10 as its board ranks it, scores in
+// ticks), or null when none is final. Its players join `players`. `daily` is the Daily
+// Report's, not a Workshop standing, so the /you modes below leave it out.
+// Multiballs draws the Daily Report's image from all of it.
 //
 // GET /api/standings?ladders&player=<steam id>: /you's four cards for that player (YouLadders
 // in lib/ladder.ts): each list's top 3 and the players around them, with the line under the
@@ -12,10 +17,10 @@
 //
 // `since` is an ISO time or Unix ms, read down to the hour; without it, the /you baseline (24
 // hours before the most recent 16:00 UTC). One baselineOf refuses is a 400.
-import { getWorkshopStandings } from "../../../db/data";
+import { getDailyWins, getLatestDaily, getWorkshopStandings } from "../../../db/data";
 import { isStandingsStat, laddersOf, sliceOf } from "../../../lib/ladder";
 import { BOARD_CHUNK, isSteamId } from "../../../lib/rules";
-import { baselineOf } from "../../../lib/workshop-standings";
+import { baselineOf, withDaily } from "../../../lib/workshop-standings";
 
 /* "Show all" reads a few chunks at a time, around You and then as it scrolls */
 const MAX_SLICE = BOARD_CHUNK * 4;
@@ -41,5 +46,10 @@ export async function GET(request: Request) {
     const count = Math.min(MAX_SLICE, Math.max(1, Math.floor(Number(params.get("count")) || 50)));
     return Response.json(sliceOf(await getWorkshopStandings(since), list, from, count));
   }
-  return Response.json(await getWorkshopStandings(since));
+  const [standings, wins, latest] = await Promise.all([
+    getWorkshopStandings(since),
+    getDailyWins(),
+    getLatestDaily(),
+  ]);
+  return Response.json(withDaily(standings, wins, latest, since));
 }

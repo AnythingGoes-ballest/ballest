@@ -110,8 +110,23 @@ const SiteStandingRow = Schema.transform(
 );
 const SiteStandingList = Schema.Array(SiteStandingRow);
 
-/** The leaderboard site's GET /api/standings (web/lib/rows.ts, WorkshopStandings): the four
- * Workshop standings now and at a baseline, each list in the site's order. */
+/** The newest final Daily as the site serves it (web/lib/rows.ts, LatestDaily): its Map, its
+ * player count, and its top 10 as its board ranks it, each an index into `players`, the score in
+ * ticks and the rank. */
+const SiteLatestDaily = Schema.Struct({
+  date: Schema.String,
+  title: Schema.String,
+  preview: Schema.NullOr(Schema.String),
+  players: Schema.Number,
+  top: Schema.Array(
+    Schema.Struct({ player: Schema.Number, score: Schema.Number, rank: Schema.Number }),
+  ),
+});
+
+/** The leaderboard site's GET /api/standings (web/lib/rows.ts, StandingsPayload): the Workshop
+ * standings the report draws and, beside them, Most Daily wins, now and at a baseline, each list
+ * in the site's order, and the newest final Daily (null while none is final). The site also
+ * serves top 5s, which the report no longer reads. */
 export const SiteStandings = Schema.Struct({
   readAt: Schema.NullOr(Schema.String),
   since: Schema.String,
@@ -121,8 +136,8 @@ export const SiteStandings = Schema.Struct({
     played: SiteStandingList,
     author: SiteStandingList,
     wr: SiteStandingList,
-    top5: SiteStandingList,
   }),
+  daily: Schema.Struct({ wins: SiteStandingList, latest: Schema.NullOr(SiteLatestDaily) }),
 });
 export type SiteStandings = typeof SiteStandings.Type;
 

@@ -68,12 +68,13 @@ export interface ReportData {
 
 // ---------------------------------------------------------------- the report
 
-export type Stat = "played" | "author" | "wr" | "top5";
-/** The four Workshop standings, in the image's order. */
-export const STATS: ReadonlyArray<Stat> = ["played", "author", "wr", "top5"];
+export type Stat = "played" | "author" | "wr" | "wins";
+/** The report's four standings, in the image's order: three Workshop standings and Most Daily
+ * wins (GLOSSARY.md, Daily wins). */
+export const STATS: ReadonlyArray<Stat> = ["played", "author", "wr", "wins"];
 
 /**
- * One player on one of the Workshop standings, as the site counts it (GET /api/standings, docs/adr/
+ * One player on one of the report's standings, as the site counts it (GET /api/standings, docs/adr/
  * 0011). A place is shared: 1 + the players with a strictly higher count.
  */
 export interface SiteStanding {
@@ -85,8 +86,29 @@ export interface SiteStanding {
   readonly place: number;
   readonly placeBefore: number;
 }
-/** The four Workshop standings, each in the site's order: most first, ties as the site breaks them. */
-export type Standings = Readonly<Record<Stat, ReadonlyArray<SiteStanding>>>;
+/** Yesterday's Daily: the newest final Daily, as the site reads it (GET /api/standings). */
+export interface YesterdayDaily {
+  /** Its day, "2026-10-31". */
+  readonly date: string;
+  readonly title: string;
+  /** The Map's Workshop preview, or null when no catalogue has a picture. */
+  readonly preview: string | null;
+  /** Players with a time on its board. */
+  readonly players: number;
+  /** Its top 10 as its board ranks it, each score in ticks. */
+  readonly top: ReadonlyArray<{
+    readonly steamId: string;
+    readonly persona: string;
+    readonly score: number;
+    readonly rank: number;
+  }>;
+}
+
+/** What the report reads from the site: its four standings, each in the site's order (most
+ * first, ties as the site breaks them), and yesterday's Daily, or null while no Daily is final. */
+export type Standings = Readonly<Record<Stat, ReadonlyArray<SiteStanding>>> & {
+  readonly yesterday: YesterdayDaily | null;
+};
 
 export interface Standing {
   readonly steamId: string;
@@ -106,7 +128,7 @@ export interface Board {
   readonly out: ReadonlyArray<Pick<Standing, "steamId" | "persona">>;
 }
 
-/** One player on the overall standing: points from their places on the four Workshop standings. */
+/** One player on the overall standing: points from their places on the report's four standings. */
 export interface OverallStanding {
   readonly steamId: string;
   readonly persona: string;
@@ -183,6 +205,8 @@ export interface RecordCandidate {
 
 export interface Report {
   readonly at: number;
+  /** The newest final Daily, drawn above Overall, or null while none is final. */
+  readonly yesterday: YesterdayDaily | null;
   /** The data's age: when the last Refresh finished (ms), or null with none yet. */
   readonly refreshedAt: number | null;
   readonly maps: number;
@@ -213,7 +237,7 @@ const byRank = (a: ReportEntry, b: ReportEntry) =>
 /**
  * The Entries on a Map that count, in rank order. A creator's own Entry counts only if it beats
  * the Author Medal by CREATOR_BEAT_MARGIN: the Author time is their publishing run, so matching
- * it is not a finish. Positions (world record, top 5) are counted among these.
+ * it is not a finish. Positions (world record) are counted among these.
  */
 export const counted = (map: ReportMap, entries: ReadonlyArray<ReportEntry>) =>
   [...entries]
@@ -287,7 +311,7 @@ const overallStandings = (standings: Standings): OverallStandings => {
         persona: s.persona,
         points: 0,
         pointsBefore: 0,
-        places: { played: null, author: null, wr: null, top5: null },
+        places: { played: null, author: null, wr: null, wins: null },
       };
       if (place !== null) p.points += pointsFor(place);
       if (before !== null) p.pointsBefore += pointsFor(before);
@@ -434,6 +458,7 @@ export const buildReport = (data: ReportData, standings: Standings, at: number):
   const title = (m: ListedMap) => m.title.toLowerCase();
   return {
     at,
+    yesterday: standings.yesterday,
     refreshedAt: data.refreshedAt,
     maps: data.maps.length,
     players: standings.played.filter((s) => s.n > 0).length,

@@ -150,22 +150,32 @@ closes. A lead held by one player on it is a Reign, as on the site.
 _Avoid_: daily challenge post, Daily Report (that is the stats post)
 
 **Daily Report**:
-Multiballs' once-a-day post of the Workshop standings (Maps played, Author Medals, world
-records, top 5s) and the overall standing over them, what changed since the day before, Maps nobody has finished, unclaimed
-Author Medals and the longest-standing records. A creator counts on their own Map only by
+Multiballs' once-a-day post of yesterday's Daily (the newest final Daily's top 10), four
+standings (Maps played, Author Medals and world records from the Workshop standings, and Daily
+wins) and the overall standing over them, what changed
+since the day before, Maps nobody has finished, unclaimed Author Medals and the longest-standing
+records. A creator counts on their own Map only by
 beating its Author Medal, since the Author time is their publishing run.
 _Avoid_: daily stats, stat report
 
 **Workshop standings**:
-The four lists the Daily Report and /you show, Maps played, Author Medals, world records and
-top 5s, counted over the Maps the Workshop lists now, as they stand now and at a baseline.
+The four lists /you shows, Maps played, Author Medals, world records and top 5s (the Daily
+Report shows the first three, beside Daily wins), counted over the Maps the Workshop lists now, as they stand now and at a baseline.
 Players level on a count share its place: 1 + the players with a strictly higher count. A
 Map whose board was first read after the baseline counts as it stands on both sides.
 _Avoid_: rankings, the report's boards (the Players table is not these lists: it counts the
 Circuit too, and podiums)
 
+**Daily wins**:
+How many final Dailies a player came 1st on, as the Daily standings rank their boards: the
+Daily Report's Most Daily wins, counted by the site beside the Workshop standings. A Daily
+counts at a baseline once the read that made it final had finished by then. Players level on
+wins share a place, as on the Workshop standings.
+_Avoid_: Daily golds, Daily titles
+
 **Overall standing**:
-The Daily Report's list over the four Workshop standings, drawn as "Overall" above them: a
+The Daily Report's list over its four standings (Maps played, Author Medals, world records and
+Daily wins), drawn as "Overall" above them: a
 player scores 10 points for 1st on a standing down to 1 for 10th, nothing outside a top 10,
 added across the four (40 at most). Players level on points share a place, as on the four.
 _Avoid_: Overall board (that is Steam's Circuit points board), overall score

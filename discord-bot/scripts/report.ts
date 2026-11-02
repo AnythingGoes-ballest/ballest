@@ -8,6 +8,7 @@ import { PlatformConfigProvider } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Clock, Effect, Layer } from "effect";
 import { ChosenSkinsLive } from "../src/chosenSkins.js";
+import { MapPreviews, PreviewSourceLive } from "../src/previews.js";
 import { ReportChannelLive } from "../src/report/channel.js";
 import { postReport } from "../src/report/daily.js";
 import { GhostDatesLive } from "../src/steam/ghosts.js";
@@ -57,6 +58,7 @@ program.pipe(
       ReportChannelLive,
       Renderer.Default,
       ChosenSkinsLive,
+      MapPreviews.Default.pipe(Layer.provide(PreviewSourceLive)),
     ),
   ),
   Effect.provide(

@@ -147,6 +147,7 @@ describe("a player's marble", () => {
       {
         title: "Daily Report",
         subtitle: "",
+        daily: null,
         boards: [
           {
             title: "Most played",
