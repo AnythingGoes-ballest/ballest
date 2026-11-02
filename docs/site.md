@@ -796,6 +796,12 @@ branch `claude/prototype-prefabs` (spec #213).
   outline in one view pushed through the bounds, squeezed by a second view's outline where that
   helps (`lib/prefab-profiles.ts`): coarse outlines, a few dozen points traced from mesh renders
   in the private ballest-map-making (`extract/piece_profiles.py`), never the mesh itself.
+  After a game update adds pieces, `tsx scripts/prefab-pieces.ts <pieces.json>` (from `web/`)
+  adds them from the piece catalogue read from the game's packages: each new class and its mesh,
+  the mesh's bounds, and the stand-in closest to its three outlines (a primitive, or an outline
+  traced from the mesh's triangles), leaving the entries already there alone. The 2026-11-01
+  update's 42 (the Shapes spheres and capsules, Tubes, Lights, the laser, elevator, paddle,
+  spinning cylinder, checkpoint disc and decal) came in that way.
   `pnpm --silent qa piece` scores each against those renders. Each piece is coloured by its material's name (or, for a piece whose file names none, like a vent, the catalogue's, `PIECE_MATERIALS`); an Emissive
   material glows, as the game's lamps do. A fill light opposite
   the key keeps every side's colours true, so a sign seen from the front isn't greyed. Rotations are Unreal's [pitch, yaw, roll] in
