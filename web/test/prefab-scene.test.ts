@@ -23,7 +23,35 @@ function cubes(...items: Array<[Array<number>, string]>): PrefabFile {
   };
 }
 
+const SPHERE = "/Game/Blueprints/Editor/BP_Prim_Sphere.BP_Prim_Sphere_C";
+const SPHERE_MESH = "/Game/Maps/_GENERATED/PC/SM_Sphere.SM_Sphere";
+const TORUS = "/Game/Blueprints/Editor/MP_RoundedTorus.MP_RoundedTorus_C";
+const TORUS_MESH = "/Game/Maps/_GENERATED/PC/Torus.Torus";
+
+/* n of one piece in a row, 50 m apart */
+function row(n: number, piece: string, mesh: string): PrefabFile {
+  return {
+    ...cubes(),
+    items: Array.from({ length: n }, (_, i) => ({
+      class: piece,
+      transform: { location: [i * 5000, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      meshes: [{ mesh, materials: [LIME] }],
+    })),
+  };
+}
+
 const three = await loadThree();
+
+/* the triangles the scene draws, every instance counted */
+const trianglesOf = (scene: import("three").Scene) => {
+  let n = 0;
+  scene.traverse((o) => {
+    if (!(o instanceof three.THREE.InstancedMesh)) return;
+    const g = o.geometry as import("three").BufferGeometry;
+    n += ((g.index?.count ?? g.getAttribute("position").count) / 3) * o.count;
+  });
+  return n;
+};
 
 /* the scene's draws, as how many pieces each one draws, fewest first */
 const drawsOf = (scene: import("three").Scene) => {
@@ -63,6 +91,31 @@ describe("a Prefab's scene", () => {
     /* each line is two points, and the lines run both ways; 41 of them bound 40 squares */
     const lines = grid.geometry.getAttribute("position").count / 2 / 2;
     expect(lines).toBeLessThanOrEqual(41);
+  });
+});
+
+describe("round pieces' detail", () => {
+  /* the GIF of a Daily's Map is drawn in software (daily-spin.yml), at about a millisecond for
+     every thousand triangles on a laptop and four times that on Actions: SPOOKY Rooms' 450
+     spheres drew 547k a frame and timed out (2026-11-04), a Map of 2,727 spheres 3.3M */
+  test("a few spheres or toruses keep their full detail", () => {
+    const one = trianglesOf(buildScene(three, row(1, SPHERE, SPHERE_MESH), false).scene);
+    const ten = trianglesOf(buildScene(three, row(10, SPHERE, SPHERE_MESH), false).scene);
+    expect(ten).toBe(10 * one);
+    expect(one).toBeGreaterThan(1000);
+    const torus = trianglesOf(buildScene(three, row(1, TORUS, TORUS_MESH), false).scene);
+    expect(torus).toBeGreaterThan(1000);
+  });
+
+  test.each([
+    [450, "spheres", SPHERE, SPHERE_MESH],
+    [2727, "spheres", SPHERE, SPHERE_MESH],
+    [600, "toruses", TORUS, TORUS_MESH],
+  ])("%i %s draw coarser, each still round", (n, _, piece, mesh) => {
+    const all = trianglesOf(buildScene(three, row(n, piece, mesh), false).scene);
+    expect(all / n).toBeGreaterThanOrEqual(150);
+    /* within the budget, or each at the coarsest detail where even that can't be */
+    expect(all).toBeLessThanOrEqual(Math.max(150_000, n * 170));
   });
 });
 

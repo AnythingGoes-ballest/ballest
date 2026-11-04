@@ -2,7 +2,9 @@
 // spinning GIF for its Daily Post (spec #268) and stores it in map_spins at DATABASE_URL.
 // daily-spin.yml runs it when Multiballs asks. It opens the Map's 3D view on the site (the
 // "See it in 3D" dialog) in Chromium with software WebGL, hides the bar and the hint, turns the
-// Map one full turn by dragging it, a frame at a time, and encodes the frames with ffmpeg as a
+// Map one full turn a frame at a time (the viewer's turn event, which stops its own loop, so
+// the page draws each frame once: in software a big Map's frame takes seconds), and encodes
+// the frames with ffmpeg as a
 // ~360 px GIF at 12.8 frames a second, one turn in about 12.5 s. The version stored is the
 // map_files version the site draws; a Map with no file is refused. `--no-db` only writes --out,
 // for a look without a database.
@@ -14,6 +16,7 @@ import { execFileSync } from "node:child_process";
 import { eq, sql } from "drizzle-orm";
 import { chromium } from "playwright-core";
 
+import { TURN_EVENT } from "../components/prefabs/scene";
 import { connect } from "../db/client";
 import { mapFiles, mapSpins } from "../db/schema";
 
@@ -22,11 +25,6 @@ const FRAMES = 160;
 const FPS = 12.8;
 const SIZE = 640; // the page's viewport, square
 const GIF_WIDTH = 360;
-/* drags before the first frame: the view eases each drag in (OrbitControls' damping), so the
-   turn per frame settles only after a few, and from then on frame FRAMES is frame 0 again */
-const WARM_UP = 40;
-/* animation frames the page draws between drags, the same every time, so the easing is too */
-const TICKS = 6;
 
 const args = process.argv.slice(2);
 const option = (name: string) => {
@@ -101,38 +99,27 @@ async function draw(pfid: string, dir: string): Promise<Buffer> {
     await view.locator("canvas").waitFor();
     await page.waitForSelector("dialog.m3d .m3d-view[data-ready]", { timeout: 120_000 });
     await page.addStyleTag({ content: ".m3d-top,.m3d-hint{display:none!important}" });
-    // OrbitControls turns the view 2π per drag the canvas's height across, so a turn in FRAMES
-    // drags is the canvas's height in all, measured rather than assumed
-    const box = await view.locator("canvas").boundingBox();
-    if (!box) throw new Error("the 3D view has no canvas");
-    const height = await view
-      .locator("canvas")
-      .evaluate((c) => (c as HTMLCanvasElement).clientHeight);
-    const y = box.y + box.height / 2;
-    const x0 = box.x + box.width / 4;
-    let moved = 0;
-    const drag = async (i: number) => {
-      const to = Math.round(((i + 1) * height) / FRAMES);
-      const dx = to - moved;
-      moved = to;
-      await page.mouse.move(x0, y);
-      await page.mouse.down();
-      await page.mouse.move(x0 + dx, y, { steps: 2 });
-      await page.mouse.up();
-      // as text: tsx would name an arrow function with a helper the page doesn't have
-      await page.evaluate(`new Promise((done) => {
-        let left = ${TICKS};
-        const tick = () => (--left <= 0 ? done() : requestAnimationFrame(tick));
-        requestAnimationFrame(tick);
-      })`);
-    };
-    for (let i = 0; i < WARM_UP; i++) await drag(i % FRAMES);
-    moved = 0;
+    // as text: tsx would name an arrow function with a helper the page doesn't have
+    const turn = (by: number) =>
+      page.evaluate(
+        `document.querySelector("dialog.m3d .m3d-view").dispatchEvent(new CustomEvent(${JSON.stringify(TURN_EVENT)}, { detail: ${by} }))`,
+      );
+    await turn(0);
+    if ((await view.getAttribute("data-turns")) !== "1")
+      throw new Error(
+        `${site}'s 3D view doesn't take ${TURN_EVENT}: is it older than map-spin.ts?`,
+      );
+    const start = Date.now();
     for (let i = 0; i < FRAMES; i++) {
       await page.screenshot({ path: join(dir, `f${String(i).padStart(3, "0")}.png`) });
-      await drag(i);
+      await turn((2 * Math.PI) / FRAMES);
+      if ((i + 1) % 40 === 0)
+        console.log(
+          `${pfid}: frame ${i + 1} of ${FRAMES}, ${((Date.now() - start) / 1000).toFixed(0)} s`,
+        );
     }
-    if (moved !== height) throw new Error(`dragged ${moved} px for a turn of ${height}`);
+    const turns = await view.getAttribute("data-turns");
+    if (turns !== String(FRAMES + 1)) throw new Error(`the view turned ${turns} times`);
   } finally {
     await browser.close();
   }

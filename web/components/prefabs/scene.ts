@@ -18,6 +18,10 @@ import {
 
 type Three = typeof import("three");
 
+/* the event a script sends a viewer's host to turn it one frame and draw it once
+   (PrefabViewer, scripts/map-spin.ts) */
+export const TURN_EVENT = "viewer-turn";
+
 export async function loadThree() {
   const THREE = await import("three");
   const { RoundedBoxGeometry } =
@@ -48,10 +52,19 @@ export function buildScene(
     cone: new THREE.CylinderGeometry(0, 0.5, 1, 40),
     /* four sides, its corners at the middle of the bounds' edges, as SM_Pyramid's are */
     pyramid: new THREE.CylinderGeometry(0, 0.5, 1, 4),
-    sphere: new THREE.SphereGeometry(0.5, 32, 20),
     halfRing: ringGeometry(THREE, "half"),
     quarterRing: ringGeometry(THREE, "quarter"),
-    torus: torusGeometry(THREE),
+  };
+  const shapes = shapesOf(file);
+  /* a sphere or a torus is drawn finest where a file has a few, coarser where it has hundreds */
+  const count = { sphere: 0, torus: 0 };
+  for (const s of shapes)
+    if (!s.profile && (s.kind === "sphere" || s.kind === "torus")) count[s.kind]++;
+  const [across, down] = finest(SPHERE_DETAIL, count.sphere, ([a, d]) => a * (d - 1) * 2);
+  const [tube, around] = finest(TORUS_DETAIL, count.torus, ([t, r]) => t * r * 2);
+  const roundGeometry = {
+    sphere: new THREE.SphereGeometry(0.5, across, down),
+    torus: torusGeometry(THREE, tube, around),
   };
   /* one geometry per outline, however many pieces share it */
   const profiles = new Map<MeshProfile, import("three").BufferGeometry>();
@@ -71,9 +84,12 @@ export function buildScene(
       matrices: Array<Array<number>>;
     }
   >();
-  const shapes = shapesOf(file);
   for (const s of shapes) {
-    const g = s.profile ? prismGeometry(s.profile) : geometry[s.kind];
+    const g = s.profile
+      ? prismGeometry(s.profile)
+      : s.kind === "sphere" || s.kind === "torus"
+        ? roundGeometry[s.kind]
+        : geometry[s.kind];
     const key = `${g.uuid}|${s.colour}|${s.glow}`;
     let batch = batches.get(key);
     if (!batch) {
@@ -125,6 +141,33 @@ export function buildScene(
 }
 
 const GRID_MAX = 40;
+
+/* The most triangles a file's spheres, or its toruses, take between them before they're drawn
+   coarser. The 3D view of a Daily's Map is drawn in software for its spinning GIF
+   (scripts/map-spin.ts), where a frame takes about a millisecond for every thousand triangles
+   on a laptop and four times that on Actions: SPOOKY Rooms' 450 full spheres were 547k, and
+   its GIF timed out (2026-11-04). A phone drawing a big Map is spared them too. */
+const ROUND_BUDGET = 150_000;
+/* a sphere's segments around and down, finest first */
+const SPHERE_DETAIL: ReadonlyArray<readonly [number, number]> = [
+  [32, 20],
+  [24, 14],
+  [16, 10],
+  [12, 8],
+];
+/* a torus's segments around its tube and around its ring, finest first */
+const TORUS_DETAIL: ReadonlyArray<readonly [number, number]> = [
+  [16, 64],
+  [12, 40],
+  [8, 28],
+  [6, 16],
+];
+
+/* the finest detail that keeps n pieces within ROUND_BUDGET, or the coarsest */
+function finest<T>(details: ReadonlyArray<T>, n: number, triangles: (detail: T) => number): T {
+  const fits = details.find((d) => n * triangles(d) <= ROUND_BUDGET);
+  return fits ?? (details.at(-1) as T);
+}
 
 /* the game's water as a flat sheet at height y (metres), reaching WATER_REACH of the framing's
    radius past the pieces on every side; it stands in for the ground grid, which would show
@@ -338,8 +381,8 @@ function ringGeometry(THREE: Three, cut: "half" | "quarter") {
 
 /* MP_RoundedTorus's stand-in: a ring lying flat (Unreal's x-y plane) whose tube is the bounds'
    height, 300 of 2300 cm across */
-function torusGeometry(THREE: Three) {
-  const g = new THREE.TorusGeometry(1000, 150, 16, 64);
+function torusGeometry(THREE: Three, tube: number, around: number) {
+  const g = new THREE.TorusGeometry(1000, 150, tube, around);
   g.rotateX(Math.PI / 2);
   g.scale(1 / 2300, 1 / 300, 1 / 2300);
   return g;
