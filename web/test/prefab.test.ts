@@ -14,6 +14,8 @@ import {
 } from "../lib/prefab";
 import { MAX_BYTES, checkPrefab, fileNameOf } from "../lib/prefab-check";
 import { MESHES, PIECE_MESHES } from "../lib/prefab-meshes";
+import { PIECES } from "../lib/prefab-pieces";
+import { PROFILES } from "../lib/prefab-profiles";
 import { DEFAULT_ANGLE, PAN_MAX, ZOOM_RANGE, checkAngle, galleryOf } from "../lib/prefabs";
 
 const sample = (name: string) =>
@@ -329,7 +331,7 @@ describe("the upload check", () => {
     near(footprintOf([shape]), [12, 12, 12]);
   });
 
-  /* every piece the editor's menus gained in the 2026-10-31 and 2026-11-01 updates, by the
+  /* every solid piece the editor's menus gained in the 2026-10-31 and 2026-11-01 updates, by the
      class it saves (scripts/prefab-pieces.ts) */
   const ADDED = [
     "BP_Elevator",
@@ -364,9 +366,12 @@ describe("the upload check", () => {
     "BP_GlossyRed_WholeSphere",
     "BP_PhysicsPaddle",
     "BP_SpinningCylinder",
-    "BP_UGCCircuitDecal",
     "MP_ActualCheckpoint_Disc",
     "MP_LaserTerminal",
+  ];
+  /* and the lights and the decal they gained, which a player never sees as a solid */
+  const UNDRAWN = [
+    "BP_UGCCircuitDecal",
     "MP_LightCard_01",
     "MP_LightCard_02",
     "MP_LightCard_03",
@@ -388,9 +393,65 @@ describe("the upload check", () => {
     expect(shapes.every((s) => s.size.every((v) => v > 0))).toBe(true);
   });
 
-  test("every piece's mesh has a stand-in", () => {
+  test("the lights and the decal pass, and aren't drawn, whatever mesh their file names", () => {
+    /* a raw light's file names the editor's bulb, a light card its beam: neither is drawn */
+    const items = UNDRAWN.flatMap((piece) => [
+      { ...SPHERE, class: `/Game/LevelEditor/${piece}.${piece}_C`, meshes: [] },
+      {
+        ...SPHERE,
+        class: `/Game/LevelEditor/${piece}.${piece}_C`,
+        meshes: [{ ...SPHERE.meshes[0], mesh: "/Engine/BasicShapes/Sphere.Sphere" }],
+      },
+    ]);
+    expect(checkPrefab(withFile({ items }))).toEqual({ ok: true, pieces: items.length });
+    const file = { ...cubes(), items: items as unknown as PrefabFile["items"] };
+    expect(shapesOf(file)).toEqual([]);
+    expect(footprintOf(shapesOf(file))).toEqual({ w: 0, d: 0, h: 0 });
+    /* beside a solid one, only the solid one is drawn */
+    const withSphere = {
+      ...file,
+      items: [...file.items, SPHERE] as unknown as PrefabFile["items"],
+    };
+    expect(shapesOf(withSphere).map((s) => s.piece)).toEqual(["BP_GlossyRed_WholeSphere"]);
+  });
+
+  test("a piece whose file names no mesh the table knows is drawn from its own (PIECE_MESHES)", () => {
+    /* Pipe Half1 and Ramp Curve1 are drawn from their own meshes since 2026-11-02, not SM_1000's */
+    for (const [piece, mesh] of [
+      ["BP_Pipe_Half1", "SM_1000_180"],
+      ["BP_Ramp_Curve1", "SM_1000_45"],
+    ] as const) {
+      expect(PIECE_MESHES[piece]).toBe(mesh);
+      const [shape] = shapesOf({
+        ...cubes(),
+        items: [
+          {
+            ...SPHERE,
+            class: `/Game/X/${piece}.${piece}_C`,
+            transform: { ...SPHERE.transform, scale: [1, 1, 1] },
+            meshes: [],
+          },
+        ] as unknown as PrefabFile["items"],
+      });
+      const bounds = MESHES[mesh];
+      expect(shape.profile, piece).toBe(PROFILES[mesh]);
+      near({ w: shape.size[0], d: shape.size[2], h: shape.size[1] }, [
+        ((bounds?.max[0] ?? 0) - (bounds?.min[0] ?? 0)) / 100,
+        ((bounds?.max[1] ?? 0) - (bounds?.min[1] ?? 0)) / 100,
+        ((bounds?.max[2] ?? 0) - (bounds?.min[2] ?? 0)) / 100,
+      ]);
+    }
+  });
+
+  test("every piece's mesh has a stand-in, and every drawn piece is one the editor offers", () => {
     const missing = Object.entries(PIECE_MESHES).filter(([, mesh]) => !MESHES[mesh ?? ""]);
     expect(missing).toEqual([]);
+    expect(Object.keys(PIECE_MESHES).filter((piece) => !PIECES.includes(piece))).toEqual([]);
+    for (const piece of UNDRAWN) expect(PIECES, piece).toContain(piece);
+  });
+
+  test("a piece that left the menus still passes, so an older Prefab does", () => {
+    expect(PIECES).toContain("BP_Prim_Sphere");
   });
 
   test("a file over 4 MB is refused before it is read", () => {

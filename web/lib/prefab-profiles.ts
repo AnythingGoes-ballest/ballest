@@ -4,8 +4,8 @@
 // repo (ADR 0001). Each shape is an outline then its holes, as flat x, y lists. A squeeze is
 // where a second view's outline lets the prism reach along the axis it is pushed through,
 // [low, high] thousandths at evenly spaced places along the axis the two views share. The
-// outlines of the meshes a game update adds are traced from their triangles by
-// scripts/prefab-pieces.ts instead.
+// outlines of the meshes a game update adds are traced from the meshes' own triangles instead, by
+// scripts/prefab-pieces.ts, which writes PROFILES out whole.
 import type { MeshProfile } from "./prefab";
 
 export const PROFILES: Partial<Record<string, MeshProfile>> = {
@@ -1459,32 +1459,6 @@ export const PROFILES: Partial<Record<string, MeshProfile>> = {
         ],
       ],
     ],
-  },
-  S_EV_SimpleLightBeam_01: {
-    view: "top",
-    shapes: [
-      [
-        [
-          0, 460, 15, 365, 45, 305, 60, 250, 145, 140, 175, 125, 250, 60, 305, 45, 350, 20, 460, 0,
-          540, 0, 635, 15, 695, 45, 750, 60, 860, 145, 875, 175, 940, 250, 955, 305, 980, 350, 1000,
-          460, 1000, 540, 985, 635, 955, 695, 940, 750, 855, 860, 825, 875, 750, 940, 695, 955, 650,
-          980, 540, 1000, 460, 1000, 365, 985, 305, 955, 250, 940, 140, 855, 125, 825, 60, 750, 45,
-          695, 20, 650, 0, 540,
-        ],
-        [
-          380, 470, 380, 530, 390, 560, 420, 595, 470, 620, 530, 620, 560, 610, 595, 580, 620, 530,
-          620, 470, 610, 440, 580, 405, 530, 380, 470, 380, 440, 390, 405, 420,
-        ],
-      ],
-    ],
-    squeeze: {
-      view: "front",
-      spans: [
-        0, 70, 0, 175, 0, 280, 0, 400, 0, 505, 0, 615, 0, 735, 0, 840, 0, 950, 0, 1000, 0, 1000, 0,
-        1000, 0, 1000, 0, 1000, 0, 1000, 0, 950, 0, 840, 0, 735, 0, 615, 0, 505, 0, 400, 0, 280, 0,
-        175, 0, 70,
-      ],
-    },
   },
   ShallowbowlV2: {
     view: "top",

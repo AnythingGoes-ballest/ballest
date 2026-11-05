@@ -796,13 +796,19 @@ branch `claude/prototype-prefabs` (spec #213).
   outline in one view pushed through the bounds, squeezed by a second view's outline where that
   helps (`lib/prefab-profiles.ts`): coarse outlines, a few dozen points traced from mesh renders
   in the private ballest-map-making (`extract/piece_profiles.py`), never the mesh itself.
-  After a game update adds pieces, `tsx scripts/prefab-pieces.ts <pieces.json>` (from `web/`)
-  adds them from the piece catalogue read from the game's packages: each new class and its mesh,
-  the mesh's bounds, and the stand-in closest to its three outlines (a primitive, or an outline
-  traced from the mesh's triangles), leaving the entries already there alone. The 2026-11-01
-  update's 42 (the Shapes spheres and capsules, Tubes, Lights, the laser, elevator, paddle,
-  spinning cylinder, checkpoint disc and decal) came in that way.
-  `pnpm --silent qa piece` scores each against those renders. Each piece is coloured by its material's name (or, for a piece whose file names none, like a vent, the catalogue's, `PIECE_MATERIALS`); an Emissive
+  `pnpm --silent qa piece` scores each against those renders. After a game update, `tsx scripts/prefab-pieces.ts <pieces.json>` (from `web/`) brings
+  the tables up to the editor's menus, from the piece catalogue that
+  `ballest-map-making/extract/pieces/` reads from the game's packages: every menu piece into
+  `lib/prefab-pieces.ts`, the pieces the upload check takes (none is ever taken out, so an older
+  Prefab still passes); each piece's mesh in `PIECE_MESHES`, its Main component's when that is a
+  solid a player sees in a race, else the first such component's, else none (the lights and the
+  decal, which the viewer leaves out of the picture); and for each mesh the tables lack, its
+  bounds and the stand-in closest to its three outlines: a primitive, or an outline traced from
+  the mesh's own triangles rather than from renders (ADR 0001). It writes each table out whole
+  and reads it back, so a second run changes nothing. The 2026-11-01 update's pieces (the Shapes
+  spheres and capsules, Tubes, Lights, the laser, elevator, paddle, spinning cylinder, checkpoint
+  disc and decal) came in that way, and so did Pipe Half1's and Ramp Curve1's own meshes.
+  Each piece is coloured by its material's name (or, for a piece whose file names none, like a vent, the catalogue's, `PIECE_MATERIALS`); an Emissive
   material glows, as the game's lamps do. A fill light opposite
   the key keeps every side's colours true, so a sign seen from the front isn't greyed. Rotations are Unreal's [pitch, yaw, roll] in
   degrees; swapping y and z turns Unreal's left-handed z-up into three's right-handed y-up.

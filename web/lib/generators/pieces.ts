@@ -43,16 +43,19 @@ const isColour = (c: unknown): c is Colour => typeof c === "string" && c in COLO
 /* ---------- pieces ---------- */
 const PIECES =
   "/Game/LevelEditor/PackageAssets/MultiplayerLevelEditor/ExampleObjects/BallestPieces";
+const GLOSSY = "/Game/LevelEditor/PackageAssets/BallestAssets/MapPieces/GlossyRed";
 const KINDS = {
   cube: {
     cls: `${PIECES}/BP_Prim_Cube.BP_Prim_Cube_C`,
     mesh: "/Game/Art/GreyBoxing/_GENERATED/PC/Box_C559BEB3.Box_C559BEB3",
     size: [1000, 1000, 1000],
   },
+  /* the Shapes menu's sphere (its old BP_Prim_Sphere left the menus): pivot at its centre */
   sphere: {
-    cls: `${PIECES}/BP_Prim_Sphere.BP_Prim_Sphere_C`,
-    mesh: "/Game/Maps/_GENERATED/PC/SM_Sphere.SM_Sphere",
-    size: [400, 400, 400],
+    cls: `${GLOSSY}/BP_GlossyRed_WholeSphere.BP_GlossyRed_WholeSphere_C`,
+    mesh: `${GLOSSY}/Meshes/SM_GlossyRed_WholeSphere.SM_GlossyRed_WholeSphere`,
+    size: [1000, 1000, 1000],
+    centred: true,
   },
   cylinder: {
     cls: `${PIECES}/BP_Prim_Cylinder.BP_Prim_Cylinder_C`,
@@ -85,7 +88,11 @@ export function piece(
   rot: V3 | number = 0,
 ): PrefabItem {
   const k = KINDS[kind];
-  return placed(k.cls, k.mesh, 1, colour, at, typeof rot === "number" ? [0, rot, 0] : rot, [
+  const rotation: V3 = typeof rot === "number" ? [0, rot, 0] : rot;
+  /* a piece whose pivot is its centre goes half its height up its own z, so `at` stays its bottom */
+  const up = rotationRows(rotation)[2];
+  const location = "centred" in k ? (at.map((v, i) => v + (up[i] * size[2]) / 2) as V3) : at;
+  return placed(k.cls, k.mesh, 1, colour, location, rotation, [
     size[0] / k.size[0],
     size[1] / k.size[1],
     size[2] / k.size[2],

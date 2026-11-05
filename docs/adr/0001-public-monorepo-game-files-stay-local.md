@@ -21,3 +21,9 @@ per view, stored as thousandths of those bounds (`lib/prefab-profiles.ts`). They
 from the mesh renders in the private kit by its `extract/piece_profiles.py`, and the
 viewer builds its own shape from them. Meshes, textures, and the renders and in-game
 screenshots made from them stay in the kit.
+
+Since 2026-11-04 the outlines of the meshes a game update adds are traced from the meshes' own
+triangles instead, by `web/scripts/prefab-pieces.ts`, from the piece catalogue the kit's
+`extract/pieces/` reads from the game's packages. The source changes, not what comes in: each
+mesh's bounds and, for a curved one, a coarse outline per view in thousandths of them. The
+triangles and the catalogue stay local, in the kit.

@@ -1,10 +1,11 @@
 // Generated from ballest-map-making/piece_bounds.json (the editor catalogue's meshes, read from
 // the game's packages): each mesh a level-editor piece uses, by its asset name, as the stand-in
 // shape the viewer draws and its bounds in cm (lib/prefab.ts). Numbers only: the meshes
-// themselves stay out of the repo (ADR 0001). PIECE_MESHES names each piece's own mesh, for an
-// item whose file names none the table knows, and PIECE_MATERIALS the material of a piece whose
-// file names none (hand-added, from the same catalogue). The pieces a game update adds are put in
-// by scripts/prefab-pieces.ts, from the same kind of catalogue; it keeps the entries already here.
+// themselves stay out of the repo (ADR 0001). PIECE_MATERIALS is the material of a piece whose
+// file names none (hand-added, from the same catalogue). The meshes and pieces a game update
+// adds are put in by scripts/prefab-pieces.ts, from the catalogue ballest-map-making/extract/
+// pieces/ reads; it writes MESHES and PIECE_MESHES out whole, so a note on an entry goes above
+// its table, not beside the entry.
 import type { MeshShape } from "./prefab";
 
 export const MESHES: Partial<Record<string, MeshShape>> = {
@@ -257,20 +258,15 @@ export const MESHES: Partial<Record<string, MeshShape>> = {
   SM_SmallGlassPane_Flat: { kind: "box", min: [-5, -150, 0], max: [5, 150, 200] },
   SM_Sphere: { kind: "sphere", min: [-200, -200, 0], max: [200, 200, 400] },
   SM_Start_Fixed: { kind: "cylinder", min: [-500, -500, 0.01], max: [500, 500, 199.98] },
-  S_EV_SimpleLightBeam_01: { kind: "box", min: [-64, -64, -128], max: [64, 64, 0] },
-  S_EV_SimpleLightBeam_03: {
-    kind: "cone",
-    min: [-103.12, -103.12, -128],
-    max: [103.12, 103.12, 0],
-  },
   ShallowbowlV2: { kind: "box", min: [-1000, -1000, -250], max: [1000, 1000, 250] },
-  Shape_Cube: { kind: "box", min: [-50, -50, 0], max: [50, 50, 100] },
-  Shape_Sphere: { kind: "sphere", min: [-50, -50, 0], max: [50, 50, 100] },
-  Sphere: { kind: "sphere", min: [-50, -50, -50], max: [50, 50, 50] },
   SpinningCylinder: { kind: "cylinder", min: [-50, -50, -100], max: [50, 50, 100] },
   Torus: { kind: "torus", min: [-1150, -1150, 0], max: [1150, 1150, 300] },
 };
 
+/* the mesh each piece is drawn from, for an item whose file names none the table knows: a partial
+   map over the pieces the editor offers (lib/prefab-pieces.ts), as a light or a decal is no solid
+   and isn't drawn. MP_AirVent is the class a vent saves as; piece_bounds.json, read from the
+   catalogue, has it as BP_AirVent */
 export const PIECE_MESHES: Partial<Record<string, string>> = {
   BP_AirVent: "SM_AirVent",
   BP_Bevel_Full_Cap: "Bevel_Full_Cap",
@@ -339,7 +335,6 @@ export const PIECE_MESHES: Partial<Record<string, string>> = {
   BP_Track_Round_Curve: "SM_2000_Sausage_90turn",
   BP_Track_Round_Straight: "SM_1000_Sausage",
   BP_Track_Short1: "SM_500",
-  BP_UGCCircuitDecal: "Sphere",
   Bevel_Arch: "Bevel_Arch",
   Bevel_Bumper: "Bevel_Bumper",
   Bevel_BumperLongDouble: "Bevel_BumperLongDouble",
@@ -387,20 +382,12 @@ export const PIECE_MESHES: Partial<Record<string, string>> = {
   Bevel_Tall_StraightWall: "Bevel_Tall_StraightWall",
   MP_ActualCheckpoint_Disc: "SM_CheckpointDisc",
   MP_ActualCheckpoint_Strip: "SM_ActualCheckpoint_Strip",
-  /* the class a vent saves as; piece_bounds.json, read from the catalogue, has it as BP_AirVent */
   MP_AirVent: "SM_AirVent",
   MP_Cone: "SM_Cone",
   MP_FlatGlassPlane: "SM_SmallGlassPane_Flat",
   MP_FlatRing: "Boolean8",
   MP_LaserTerminal: "SM_LaserTerminal_Orbital",
-  MP_LightCard_01: "S_EV_SimpleLightBeam_01",
-  MP_LightCard_02: "S_EV_SimpleLightBeam_03",
-  MP_LightCard_03: "Shape_Sphere",
-  MP_LightCard_04: "Shape_Cube",
   MP_Pyramid: "SM_Pyramid",
-  MP_RawPointLight: "Sphere",
-  MP_RawRectLight: "Sphere",
-  MP_RawSpotLight: "Sphere",
   MP_RoundedBumper: "AJ_Prop_Box1",
   MP_RoundedGlassPlane1: "SM_RoundedGlassPlane",
   MP_RoundedTorus: "Torus",

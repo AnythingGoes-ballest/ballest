@@ -118,7 +118,8 @@ export function buildScene(
     /* a line every unit, but no more than GRID_MAX squares across, where a whole Map would
        otherwise draw thousands */
     const g = new THREE.GridHelper(size, Math.min(size, GRID_MAX), 0x5a6280, 0x2c3248);
-    g.position.set(centre.x, box.min.y - 0.001, centre.z);
+    /* a Prefab of lights alone has nothing drawn: its grid at the origin */
+    g.position.set(centre.x, box.isEmpty() ? 0 : box.min.y - 0.001, centre.z);
     scene.add(g);
   }
   return { scene, centre, radius };

@@ -3,12 +3,12 @@
 // version 1 file of 2 to 4096 pieces, each a real level-editor piece and never the start
 // piece, at most 4 MB.
 
-import { PIECE_MESHES } from "./prefab-meshes";
+import { PIECES as EDITOR_PIECES } from "./prefab-pieces";
 
 export const MAX_BYTES = 4 * 1024 * 1024;
 
-/* every piece the editor offers, by the class name it saves: each one the viewer has a mesh for */
-const PIECES = new Set(Object.keys(PIECE_MESHES));
+/* every piece the editor offers, by the class name it saves, drawn in the viewer or not */
+const PIECES = new Set(EDITOR_PIECES);
 
 export type Check = { ok: true; pieces: number } | { ok: false; problems: Array<string> };
 

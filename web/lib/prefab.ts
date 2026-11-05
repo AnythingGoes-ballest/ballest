@@ -1,13 +1,18 @@
 // A Prefab file (GLOSSARY.md) read into the shapes
 // the viewer draws. A BallestPrefab file names each piece's mesh, material and transform
 // but carries no geometry, so each mesh the editor's pieces use is a stand-in shape here,
-// sized from the mesh's bounds (cm, pivot at the bottom centre). An unknown mesh is a grey box.
+// sized from the mesh's bounds (cm, pivot at the bottom centre). An unknown mesh is a grey box,
+// and a piece the editor offers that a player never sees as a solid (a light, a decal) isn't
+// drawn at all.
 // The bounds are lib/prefab-meshes.ts; the game's meshes stay out of the repo (ADR 0001). A
 // curved piece is drawn from its outline in one view pushed through its bounds, a prism
 // (lib/prefab-profiles.ts).
 
 import { MESHES, PIECE_MATERIALS, PIECE_MESHES } from "./prefab-meshes";
+import { PIECES } from "./prefab-pieces";
 import { PROFILES } from "./prefab-profiles";
+
+const KNOWN_PIECES = new Set(PIECES);
 
 export interface PrefabFile {
   format: "BallestPrefab";
@@ -161,46 +166,54 @@ export function profileOf(mesh: string) {
   return MESHES[mesh]?.kind === "box" ? PROFILES[mesh] : undefined;
 }
 
+/** whether a piece is drawn: every one but a piece the editor offers with no mesh to draw it
+    from, a light or a decal (its file names only the editor's marker, or a light's beam) */
+export function isDrawn(piece: string) {
+  return !KNOWN_PIECES.has(piece) || PIECE_MESHES[piece] !== undefined;
+}
+
 export function shapesOf(file: PrefabFile): Array<Shape> {
-  return file.items.map((item) => {
-    const mesh = item.meshes.at(0);
-    const piece = pieceName(item);
-    const named = PIECE_MESHES[piece];
-    const meshName = mesh && MESHES[tail(mesh.mesh)] ? tail(mesh.mesh) : named;
-    const shape: MeshShape = (meshName ? MESHES[meshName] : undefined) ?? {
-      kind: "box",
-      min: [-50, -50, 0],
-      max: [50, 50, 100],
-    };
-    const first = mesh?.materials.at(0);
-    const material = first ? tail(first) : (PIECE_MATERIALS[piece] ?? "");
-    const { location, rotation, scale } = item.transform;
-    const rows = rotationRows(rotation);
-    const centre = shape.min.map((lo, i) => (lo + shape.max[i]) / 2) as Vec3;
-    const ext = shape.max.map((hi, i) => hi - shape.min[i]) as Vec3;
-    /* Unreal local axis i -> world: rows[i] * scale[i] * ext[i] (unit shape spans -0.5..0.5) */
-    const axis = (i: number) => rows[i].map((v) => v * scale[i] * ext[i]) as Vec3;
-    const local = centre.map((c, i) => c * scale[i]) as Vec3;
-    const origin = [0, 1, 2].map(
-      (k) => location[k] + rows[0][k] * local[0] + rows[1][k] * local[1] + rows[2][k] * local[2],
-    ) as Vec3;
-    /* Unreal is left-handed, z up; three is right-handed, y up: swapping y and z is both.
+  return file.items
+    .filter((item) => isDrawn(pieceName(item)))
+    .map((item) => {
+      const mesh = item.meshes.at(0);
+      const piece = pieceName(item);
+      const named = PIECE_MESHES[piece];
+      const meshName = mesh && MESHES[tail(mesh.mesh)] ? tail(mesh.mesh) : named;
+      const shape: MeshShape = (meshName ? MESHES[meshName] : undefined) ?? {
+        kind: "box",
+        min: [-50, -50, 0],
+        max: [50, 50, 100],
+      };
+      const first = mesh?.materials.at(0);
+      const material = first ? tail(first) : (PIECE_MATERIALS[piece] ?? "");
+      const { location, rotation, scale } = item.transform;
+      const rows = rotationRows(rotation);
+      const centre = shape.min.map((lo, i) => (lo + shape.max[i]) / 2) as Vec3;
+      const ext = shape.max.map((hi, i) => hi - shape.min[i]) as Vec3;
+      /* Unreal local axis i -> world: rows[i] * scale[i] * ext[i] (unit shape spans -0.5..0.5) */
+      const axis = (i: number) => rows[i].map((v) => v * scale[i] * ext[i]) as Vec3;
+      const local = centre.map((c, i) => c * scale[i]) as Vec3;
+      const origin = [0, 1, 2].map(
+        (k) => location[k] + rows[0][k] * local[0] + rows[1][k] * local[1] + rows[2][k] * local[2],
+      ) as Vec3;
+      /* Unreal is left-handed, z up; three is right-handed, y up: swapping y and z is both.
        The unit shapes are built along three's axes, so Unreal's local z (up) is three's y. */
-    const swap = (v: Vec3): Vec3 => [v[0] / 100, v[2] / 100, v[1] / 100];
-    const [ax, ay, az] = [swap(axis(0)), swap(axis(2)), swap(axis(1))];
-    const o = swap(origin);
-    const profile = meshName ? profileOf(meshName) : undefined;
-    return {
-      kind: shape.kind,
-      profile,
-      size: [ext[0] / 100, ext[2] / 100, ext[1] / 100],
-      matrix: [...ax, 0, ...ay, 0, ...az, 0, ...o, 1],
-      colour: colourOf(material),
-      glow: /Emissive/i.test(material),
-      piece,
-      material,
-    };
-  });
+      const swap = (v: Vec3): Vec3 => [v[0] / 100, v[2] / 100, v[1] / 100];
+      const [ax, ay, az] = [swap(axis(0)), swap(axis(2)), swap(axis(1))];
+      const o = swap(origin);
+      const profile = meshName ? profileOf(meshName) : undefined;
+      return {
+        kind: shape.kind,
+        profile,
+        size: [ext[0] / 100, ext[2] / 100, ext[1] / 100],
+        matrix: [...ax, 0, ...ay, 0, ...az, 0, ...o, 1],
+        colour: colourOf(material),
+        glow: /Emissive/i.test(material),
+        piece,
+        material,
+      };
+    });
 }
 
 /* a piece's name as a person reads it: "BP_Pipe_Tube1" is Pipe Tube 1, a primitive just Cube,
@@ -229,6 +242,8 @@ export function spanOf({ matrix: m }: Shape, k: number): [number, number] {
 
 /* the prefab's size in metres: wide (x), deep (z) and tall (y), over every shape's corners */
 export function footprintOf(shapes: Array<Shape>): { w: number; d: number; h: number } {
+  /* a Prefab of lights alone draws nothing */
+  if (!shapes.length) return { w: 0, d: 0, h: 0 };
   const size = (k: number) => {
     const spans = shapes.map((s) => spanOf(s, k));
     return Math.max(...spans.map((s) => s[1])) - Math.min(...spans.map((s) => s[0]));

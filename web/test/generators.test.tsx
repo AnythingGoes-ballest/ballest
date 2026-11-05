@@ -39,7 +39,7 @@ import {
   type PrefabItem,
 } from "../lib/prefab";
 import { faultsOf, parts } from "../lib/generators/checks";
-import { fileOf, piece } from "../lib/generators/pieces";
+import { ball, fileOf, piece } from "../lib/generators/pieces";
 import { checkPrefab } from "../lib/prefab-check";
 import { pieceLettering } from "../lib/generators/piece-fonts";
 import { GENERATOR_KEYS, generatorHref } from "../lib/routes";
@@ -109,6 +109,12 @@ describe("every Generator", () => {
   test.each(GENERATORS.map((g) => g.key))("%s's defaults make a file the game takes", (key) => {
     const file = make(key);
     expect(checkPrefab(JSON.stringify(file))).toEqual({ ok: true, pieces: file.items.length });
+  });
+
+  /* a piece the editor's menus no longer offer: it still spawns, but a player can't pick it */
+  test.each(GENERATORS.map((g) => g.key))("%s's defaults use only pieces in the menus", (key) => {
+    const left = make(key).items.filter((it) => it.class.includes("BP_Prim_Sphere"));
+    expect(left).toEqual([]);
   });
 
   test.each(GENERATORS.map((g) => g.key))("%s's defaults sit inside its sliders", (key) => {
@@ -605,6 +611,18 @@ describe("buildings", () => {
 });
 
 describe("the pieces", () => {
+  test("a ball is the Shapes menu's sphere, centred where it's asked, its pivot at its centre", () => {
+    const it = ball([100, 200, 500], 300, "Lime", 0.5);
+    expect(it.class).toContain("BP_GlossyRed_WholeSphere");
+    expect(it.transform.location).toEqual([100, 200, 500]);
+    const [shape] = shapesOf(fileOf([it]));
+    expect(shape.kind).toBe("sphere");
+    /* three's metres: up is y */
+    const [lo, hi] = spanOf(shape, 1);
+    expect(lo).toBeCloseTo(4.25);
+    expect(hi).toBeCloseTo(5.75);
+  });
+
   test.each([
     [
       [1, 0, 0],
