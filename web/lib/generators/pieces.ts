@@ -89,7 +89,7 @@ export function piece(
 ): PrefabItem {
   const k = KINDS[kind];
   const rotation: V3 = typeof rot === "number" ? [0, rot, 0] : rot;
-  /* a piece whose pivot is its centre goes half its height up its own z, so `at` stays its bottom */
+  /* a piece whose pivot is its centre goes half its height up its own z: `at` stays its bottom */
   const up = rotationRows(rotation)[2];
   const location = "centred" in k ? (at.map((v, i) => v + (up[i] * size[2]) / 2) as V3) : at;
   return placed(k.cls, k.mesh, 1, colour, location, rotation, [

@@ -83,7 +83,7 @@ export function merge(
 ): { tables: Tables; changes: Array<Change> } {
   const changes: Array<Change> = [];
   const pieces = new Set(tables.pieces);
-  const pieceMeshes = { ...tables.pieceMeshes };
+  const pieceMeshes = new Map(Object.entries(tables.pieceMeshes));
   const meshes = { ...tables.meshes };
   const profiles = { ...tables.profiles };
   for (const piece of catalogue.pieces.filter((p) => p.inMenu)) {
@@ -93,13 +93,13 @@ export function merge(
       changes.push({ table: "pieces", key: name });
     }
     const mesh = meshOf(piece) ?? undefined;
-    const was = pieceMeshes[name];
+    const was = pieceMeshes.get(name);
     if (mesh === was) continue;
-    if (mesh) pieceMeshes[name] = mesh;
-    else delete pieceMeshes[name];
+    if (mesh) pieceMeshes.set(name, mesh);
+    else pieceMeshes.delete(name);
     changes.push({ table: "pieceMeshes", key: name, was, now: mesh });
   }
-  for (const mesh of new Set(Object.values(pieceMeshes))) {
+  for (const mesh of new Set(pieceMeshes.values())) {
     if (!mesh || meshes[mesh]) continue;
     const { shape, profile } = fit(mesh);
     meshes[mesh] = shape;
@@ -110,7 +110,12 @@ export function merge(
     }
   }
   return {
-    tables: { pieces: [...pieces].sort(byCodePoint), pieceMeshes, meshes, profiles },
+    tables: {
+      pieces: [...pieces].sort(byCodePoint),
+      pieceMeshes: Object.fromEntries(pieceMeshes),
+      meshes,
+      profiles,
+    },
     changes,
   };
 }
@@ -161,7 +166,10 @@ export function writeTable(
       `${name}: no closing ${isArray ? "];" : "};"} on a line of its own before the next table`,
     );
   const entries = isArray
-    ? [...value].sort(byCodePoint).map((v) => `  ${JSON.stringify(v)},\n`)
+    ? (value as ReadonlyArray<string>)
+        .slice()
+        .sort(byCodePoint)
+        .map((v) => `  ${JSON.stringify(v)},\n`)
     : Object.entries(value)
         .filter(([, v]) => v !== undefined)
         .sort(([a], [b]) => byCodePoint(a, b))
