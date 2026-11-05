@@ -87,8 +87,8 @@ const payload = (lists: Lists): typeof SiteStandings.Encoded => {
       played: index(lists.played),
       author: index(lists.author),
       wr: index(lists.wr),
-      top5: index(lists.top5),
     },
+    daily: { wins: index(lists.wins), latest: null },
   };
 };
 /** The payload read as the bot reads it: decoded, then its players named. */
@@ -108,11 +108,30 @@ describe("the Daily Report's standings", () => {
       ],
       wr: [["bob", 1, 1, 1, 1]],
     });
-    expect(r.boards.map((b) => b.stat)).toEqual(["played", "author", "wr", "top5"]);
+    expect(r.boards.map((b) => b.stat)).toEqual(["played", "author", "wr", "wins"]);
     expect(r.boards.find((b) => b.stat === "wr")?.rows).toEqual([
       { steamId: "bob", persona: "BOB", n: 1, place: 1, placeBefore: 1, gain: 0 },
     ]);
     expect(r.players).toBe(3);
+  });
+
+  it("takes Most Daily wins from the site's Daily side, with yesterday's win as a gain", () => {
+    const r = build(data({}), {
+      wins: [
+        ["dan", 3, 2, 1, 1],
+        ["amy", 2, 2, 2, 1],
+      ],
+    });
+    expect(r.boards.find((b) => b.stat === "wins")?.rows).toEqual([
+      { steamId: "dan", persona: "DAN", n: 3, place: 1, placeBefore: 1, gain: 1 },
+      { steamId: "amy", persona: "AMY", n: 2, place: 2, placeBefore: 1, gain: 0 },
+    ]);
+    expect(
+      standingsImage(r, new Map()).boards[3]?.rows.map((x) => [x.name, x.place, x.move, x.gain]),
+    ).toEqual([
+      ["DAN", 1, 0, 1],
+      ["AMY", 2, -1, 0],
+    ]);
   });
 
   it("moves each row by its shared place, so a tie shows no move", () => {
@@ -187,6 +206,53 @@ describe("the Daily Report's standings", () => {
     ]);
   });
 
+  const dailyTop = (steamId: string, seconds: number, rank: number) => ({
+    steamId,
+    persona: steamId.toUpperCase(),
+    score: ticks(seconds),
+    rank,
+  });
+  const dailyOn = (date: string) => ({
+    date,
+    title: "Happy Halloween",
+    preview: "https://images.example.invalid/hh.jpg",
+    players: 291,
+    top: [dailyTop("amy", 9.604, 1), dailyTop("bob", 11.63, 2), dailyTop("cy", 69.5, 3)],
+  });
+
+  it("draws yesterday's Daily with each row's gap to 1st and time, in its Chosen Skin", () => {
+    // AT is Sunday 4 October, so Saturday 3 October's Daily is yesterday's.
+    const r = buildReport(data({}), { ...standings(), yesterday: dailyOn("2026-10-03") }, AT);
+    const pink = "/Game/Art/Materials/Instances/Ball/MI_BallPink.MI_BallPink";
+    const uri = "data:image/jpeg;base64,AAAA";
+    expect(standingsImage(r, new Map([["bob", pink]]), uri).daily).toEqual({
+      heading: "Yesterday's Daily",
+      title: "Happy Halloween",
+      meta: "Daily · Sat 3 Oct · 291 players",
+      preview: uri,
+      rows: [
+        { steamId: "amy", skin: null, name: "AMY", place: 1, gap: null, time: "9.604" },
+        { steamId: "bob", skin: pink, name: "BOB", place: 2, gap: "+2.026", time: "11.630" },
+        { steamId: "cy", skin: null, name: "CY", place: 3, gap: "+59.896", time: "1:09.500" },
+      ],
+    });
+    expect(standingsImage(r, new Map()).daily?.preview).toBeNull();
+    expect(standingsImage(build(data({})), new Map()).daily).toBeNull();
+  });
+
+  it("heads an older Daily as the latest, its date line saying which day", () => {
+    const r = buildReport(data({}), { ...standings(), yesterday: dailyOn("2026-10-01") }, AT);
+    const daily = standingsImage(r, new Map()).daily;
+    expect(daily?.heading).toBe("Latest Daily");
+    expect(daily?.meta).toBe("Daily · Thu 1 Oct · 291 players");
+  });
+
+  it("subtitles the image with the counts as Standings, since it leads with a Daily", () => {
+    expect(standingsImage(build(data({})), new Map()).subtitle).toBe(
+      "Standings · 0 Workshop Maps · 0 players",
+    );
+  });
+
   it("keeps exactly ten rows in the site's order when a tie runs past tenth", () => {
     const twelve = Array.from({ length: 12 }, (_, i): Row => [player(i), 1, 1, 1, 1]);
     const wr = build(data({}), { wr: twelve }).boards.find((x) => x.stat === "wr");
@@ -211,6 +277,55 @@ describe("the Daily Report's standings", () => {
     const bad = payload({ played: [["amy", 1, 1, 1, 1]] });
     const wr: (typeof SiteStandings.Encoded)["lists"]["wr"] = [[5, 1, 1, 1, 1]];
     expect(Either.isLeft(fromSite({ ...bad, lists: { ...bad.lists, wr } }))).toBe(true);
+    expect(Either.isLeft(fromSite({ ...bad, daily: { wins: wr, latest: null } }))).toBe(true);
+  });
+
+  it("refuses a payload without the Daily side, and reads one that still lists top 5s", () => {
+    const workshopOnly = Object.fromEntries(
+      Object.entries(payload({})).filter(([key]) => key !== "daily"),
+    );
+    expect(Either.isLeft(Schema.decodeUnknownEither(SiteStandings)(workshopOnly))).toBe(true);
+    const site = payload({ wins: [["amy", 1, 1, 1, 1]] });
+    const served = { ...site, lists: { ...site.lists, top5: [[0, 5, 5, 1, 1]] } };
+    const read = Either.getOrThrow(standingsFrom(Schema.decodeUnknownSync(SiteStandings)(served)));
+    expect(read.wins).toEqual([
+      { steamId: "amy", persona: "AMY", n: 1, nBefore: 1, place: 1, placeBefore: 1 },
+    ]);
+  });
+
+  it("carries yesterday's Daily from the site, its top 10 named, and none while none is final", () => {
+    const site = payload({ wins: [["amy", 1, 1, 1, 1]] });
+    const latest = {
+      date: "2026-10-03",
+      title: "Happy Halloween",
+      preview: "https://images.example.invalid/hh.jpg",
+      players: 291,
+      top: [
+        { player: 1, score: 1_160_400, rank: 1 },
+        { player: 0, score: 1_163_000, rank: 2 },
+      ],
+    };
+    const served = {
+      ...site,
+      players: [...site.players, ["bob", "BOB"] as [string, string]],
+      daily: { ...site.daily, latest },
+    };
+    const r = buildReport(data({}), Either.getOrThrow(fromSite(served)), AT);
+    expect(r.yesterday).toEqual({
+      date: "2026-10-03",
+      title: "Happy Halloween",
+      preview: "https://images.example.invalid/hh.jpg",
+      players: 291,
+      top: [
+        { steamId: "bob", persona: "BOB", score: 1_160_400, rank: 1 },
+        { steamId: "amy", persona: "AMY", score: 1_163_000, rank: 2 },
+      ],
+    });
+    expect(build(data({})).yesterday).toBeNull();
+    const nobody = { ...latest, top: [{ player: 7, score: 1, rank: 1 }] };
+    expect(Either.isLeft(fromSite({ ...site, daily: { ...site.daily, latest: nobody } }))).toBe(
+      true,
+    );
   });
 
   it("scores Overall 10 for 1st down to 1 for 10th on each standing, nothing outside a top 10", () => {
@@ -224,22 +339,22 @@ describe("the Daily Report's standings", () => {
         ["amy", 5, 5, 1, 1],
         ["slati", 4, 4, 2, 2],
       ],
-      top5: [
+      wins: [
         ["slati", 9, 9, 1, 1],
         ["bob", 1, 1, 10, 10],
       ],
     });
     expect(r.overall.rows.map((x) => [x.persona, x.points, x.place, x.places])).toEqual([
-      ["SLATI", 39, 1, { played: 1, author: 1, wr: 2, top5: 1 }],
-      ["AMY", 10, 2, { played: null, author: null, wr: 1, top5: null }],
-      ["BOB", 1, 3, { played: null, author: null, wr: null, top5: 10 }],
+      ["SLATI", 39, 1, { played: 1, author: 1, wr: 2, wins: 1 }],
+      ["AMY", 10, 2, { played: null, author: null, wr: 1, wins: null }],
+      ["BOB", 1, 3, { played: null, author: null, wr: null, wins: 10 }],
     ]);
   });
 
   it("scores everyone tied on a standing, and shares Overall places over exactly ten rows", () => {
     // twelve tied for 1st on world records: all twelve score 10, and share 1st Overall
     const twelve = Array.from({ length: 12 }, (_, i): Row => [player(i), 1, 1, 1, 1]);
-    const r = build(data({}), { wr: twelve, top5: [["zed", 1, 1, 1, 1]] });
+    const r = build(data({}), { wr: twelve, wins: [["zed", 1, 1, 1, 1]] });
     expect(r.overall.rows).toHaveLength(10);
     expect(r.overall.rows.map((x) => [x.steamId, x.points, x.place])).toEqual(
       twelve.slice(0, 10).map((x) => [x[0], 10, 1]),
@@ -293,12 +408,7 @@ describe("the Daily Report's standings", () => {
       ["P06", 4, 9, -1],
       ["P07", 3, 10, -1],
     ]);
-    expect(image.rows[1]?.places).toEqual([
-      { board: "MP", place: null },
-      { board: "AM", place: null },
-      { board: "WR", place: 1 },
-      { board: "T5", place: null },
-    ]);
+    expect(image.rows[1]?.places).toEqual([null, null, 1, null]);
     // P08 is 11th Overall now; P09 was 11th yesterday too, so never in the top 10
     expect(image.out).toEqual(["P08"]);
   });
@@ -405,9 +515,7 @@ describe("the Daily Report's messages", () => {
 
   it("heads the post with the day, and fits Since yesterday under Discord's limit", () => {
     const text = headMessage(busyDay());
-    expect(text.startsWith("# Sunday 4 October\n-# Workshop standings · 60 Workshop Maps")).toBe(
-      true,
-    );
+    expect(text.startsWith("# Sunday 4 October\n-# Standings · 60 Workshop Maps")).toBe(true);
     expect(text.length).toBeLessThanOrEqual(MESSAGE_LIMIT);
     expect(text).toMatch(/…and \d+ more on smaller Workshop Maps/);
     expect(text).toContain("NEW\\_HOLDER @​EVERYONE");
@@ -417,7 +525,7 @@ describe("the Daily Report's messages", () => {
   it("dates the data with a Discord timestamp", () => {
     const r = build(data({ refreshedAt: Date.UTC(2026, 9, 4, 14) }));
     expect(headMessage(r).split("\n")[1]).toBe(
-      "-# Workshop standings · 0 Workshop Maps · 0 players · data as of <t:1791122400:R>",
+      "-# Standings · 0 Workshop Maps · 0 players · data as of <t:1791122400:R>",
     );
   });
 

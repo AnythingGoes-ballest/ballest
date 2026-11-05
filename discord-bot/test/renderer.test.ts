@@ -63,6 +63,40 @@ describe("the Renderer", () => {
   );
 
   it.effect(
+    "draws the standings with yesterday's Daily over its preview, over the stand-in, or without it",
+    () =>
+      Effect.gen(function* () {
+        const renderer = yield* Renderer;
+        // a 1x1 PNG
+        const png =
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        const row = { steamId: ALICE.steamId, skin: null, name: "Alice", place: 1, gap: null };
+        const daily = (preview: string | null) => ({
+          heading: "Yesterday's Daily",
+          title: "Gully",
+          meta: "Daily · Sat 3 Oct · 1 player",
+          preview,
+          rows: [{ ...row, time: "11.604" }],
+        });
+        const image = (d: ReturnType<typeof daily> | null) =>
+          renderer.standings({
+            title: "Sunday 4 October",
+            subtitle: "",
+            daily: d,
+            boards: [],
+            overall: { rows: [], out: [] },
+          });
+        const pictured = yield* image(daily(png));
+        const standIn = yield* image(daily(null));
+        const none = yield* image(null);
+        expect(pictured.equals(standIn)).toBe(false);
+        expect(none.length).toBeGreaterThan(0);
+        expect(none.equals(standIn)).toBe(false);
+      }).pipe(Effect.provide(Renderer.Default)),
+    60_000,
+  );
+
+  it.effect(
     "lets go of every image it draws",
     () =>
       Effect.gen(function* () {

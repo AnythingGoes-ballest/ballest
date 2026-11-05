@@ -71,8 +71,8 @@ export const dailyNumber = (date: string): number =>
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-/** "Sun 18 Oct" */
-const shortDay = (date: string) => {
+/** "Sun 18 Oct", for a day written "2026-10-18" */
+export const shortDay = (date: string) => {
   const d = new Date(dayStart(date));
   return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
 };

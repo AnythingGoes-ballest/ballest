@@ -3,11 +3,13 @@ import { describe, expect, it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Option, Ref, TestClock } from "effect";
 import { OpsAlerts, opsAlertsOf } from "../src/ops.js";
 import { NoChosenSkins } from "../src/chosenSkins.js";
+import { MapPreviews, PreviewSource, PreviewUnavailable } from "../src/previews.js";
 import { Renderer } from "../src/render/renderer.js";
+import type { StandingsImage } from "../src/render/scenes.js";
 import { ReportChannel, ReportPostFailed, ThreadPostFailed } from "../src/report/channel.js";
 import { dailyLoop, ReportLogLive } from "../src/report/daily.js";
 import { GhostDates } from "../src/steam/ghosts.js";
-import { DAY_MS } from "../src/report/report.js";
+import { DAY_MS, type YesterdayDaily } from "../src/report/report.js";
 import { ReportDataUnavailable, ReportSource } from "../src/report/source.js";
 import { StandingsSource } from "../src/report/standings.js";
 
@@ -15,6 +17,18 @@ const HOUR = 3_600_000;
 const DAY0 = Date.UTC(2026, 9, 4); // midnight UTC, Sunday 4 October
 /** Where the channel message's one button goes. */
 const YOU = "https://ballestrecords.com/you";
+/** The one Map preview the fake Steam gives. */
+const PICTURED = "https://images.example.invalid/pictured.png";
+const daily = (preview: string | null): YesterdayDaily => ({
+  date: "2026-10-03",
+  title: "Gully",
+  preview,
+  players: 2,
+  top: [
+    { steamId: "amy", persona: "Amy", score: 1_160_400, rank: 1 },
+    { steamId: "bob", persona: "Bob", score: 1_163_000, rank: 2 },
+  ],
+});
 
 /** The schedule over fakes: a database refreshed `refreshedAgo` before each read, a site that
  * records which baselines it was asked for (or is down while `siteDown`), a channel that records
@@ -28,6 +42,8 @@ const setup = Effect.gen(function* () {
   const threadFailing = yield* Ref.make(false);
   const refreshedAgo = yield* Ref.make(HOUR);
   const siteDown = yield* Ref.make(false);
+  const yesterday = yield* Ref.make<YesterdayDaily | null>(null);
+  const drawn = yield* Ref.make<Array<StandingsImage["daily"]>>([]);
   const asked = yield* Ref.make<Array<number>>([]);
   const fakes = Layer.mergeAll(
     Layer.succeed(
@@ -49,7 +65,13 @@ const setup = Effect.gen(function* () {
               return yield* Effect.fail(
                 new ReportDataUnavailable({ reason: "the site's standings: ResponseError" }),
               );
-            return { played: [], author: [], wr: [], top5: [] };
+            return {
+              played: [],
+              author: [],
+              wr: [],
+              wins: [],
+              yesterday: yield* Ref.get(yesterday),
+            };
           }),
       }),
     ),
@@ -88,8 +110,23 @@ const setup = Effect.gen(function* () {
     ReportLogLive.pipe(Layer.provide(SqliteClient.layer({ filename: ":memory:" }))),
     // Drawing runs on a worker, in real time; the schedule is checked on the TestClock.
     Layer.succeed(Renderer, {
-      standings: () => Effect.succeed(new Uint8Array()),
+      standings: (image: StandingsImage) =>
+        Ref.update(drawn, (d) => [...d, image.daily]).pipe(Effect.as(new Uint8Array())),
     } as unknown as Renderer),
+    // Steam gives one preview, a PNG of three bytes, and no other
+    MapPreviews.Default.pipe(
+      Layer.provide(
+        Layer.succeed(
+          PreviewSource,
+          PreviewSource.of({
+            fetch: (url) =>
+              url === PICTURED
+                ? Effect.succeed({ type: "image/png", body: new Uint8Array([1, 2, 3]) })
+                : Effect.fail(new PreviewUnavailable({ reason: "404" })),
+          }),
+        ),
+      ),
+    ),
     NoChosenSkins,
   );
   return {
@@ -101,6 +138,8 @@ const setup = Effect.gen(function* () {
     threadFailing,
     refreshedAgo,
     siteDown,
+    yesterday,
+    drawn,
     asked,
     fakes,
   };
@@ -126,6 +165,32 @@ describe("the Daily Report's schedule", () => {
         expect(yield* Ref.get(t.heads)).toEqual(["# Sunday 4 October", "# Monday 5 October"]);
         expect(yield* Ref.get(t.links)).toEqual([YOU, YOU]);
         expect(yield* Ref.get(t.threads)).toBe(2);
+      }).pipe(Effect.provide(t.fakes));
+    }),
+  );
+
+  it.scoped("draws yesterday's Daily's preview, or the stand-in when Steam won't give it", () =>
+    Effect.gen(function* () {
+      const t = yield* setup;
+      yield* Effect.gen(function* () {
+        yield* TestClock.setTime(DAY0 + 10 * HOUR);
+        yield* runFor(5 * HOUR);
+        yield* Ref.set(t.yesterday, daily(PICTURED));
+        yield* runFor(2 * HOUR);
+        yield* Ref.set(t.yesterday, daily("https://images.example.invalid/gone.png"));
+        yield* runFor(DAY_MS);
+        yield* Ref.set(t.yesterday, null);
+        yield* runFor(DAY_MS);
+        const drawn = yield* Ref.get(t.drawn);
+        expect(drawn.map((d) => d?.preview)).toEqual([
+          "data:image/png;base64,AQID",
+          null,
+          undefined,
+        ]);
+        expect(drawn[0]?.rows.map((r) => [r.name, r.gap, r.time])).toEqual([
+          ["Amy", null, "11.604"],
+          ["Bob", "+0.026", "11.630"],
+        ]);
       }).pipe(Effect.provide(t.fakes));
     }),
   );

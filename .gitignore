@@ -32,7 +32,7 @@ tools/stop-capture.ps1
 scratch/
 __pycache__/
 .pytest_cache/
-node_modules/
+node_modules
 *.pyc
 
 # data/: no longer committed. The collector writes only the database since phase 5 of

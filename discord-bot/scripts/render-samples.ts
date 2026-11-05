@@ -7,7 +7,6 @@ import { Effect } from "effect";
 import { type Player, SCORE_TICKS_PER_SECOND, type Standing } from "../src/domain.js";
 import type { CardView } from "../src/ports.js";
 import { Renderer } from "../src/render/renderer.js";
-import { BOARD_SHORT } from "../src/report/messages.js";
 import { STATS } from "../src/report/report.js";
 import { cupStandingsImage } from "../src/weeklyCup/messages.js";
 import type { CupMap, StandingsView } from "../src/weeklyCup/model.js";
@@ -319,13 +318,57 @@ const program = Effect.gen(function* () {
     points,
     place,
     move,
-    places: STATS.map((stat, i) => ({ board: BOARD_SHORT[stat], place: places[i] ?? null })),
+    places: STATS.map((_, i) => places[i] ?? null),
   });
+  // Yesterday's Daily, over a preview drawn here rather than fetched, and over the stand-in art.
+  const preview = `data:image/svg+xml;base64,${Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="110" viewBox="0 0 640 110"><rect width="640" height="110" fill="#1d4e8f"/><circle cx="330" cy="70" r="80" fill="#2b6cc4"/><rect x="250" y="40" width="40" height="14" fill="#0b1830"/><rect x="370" y="40" width="40" height="14" fill="#0b1830"/><path d="M270 90 Q330 120 390 90" stroke="#0b1830" stroke-width="10" fill="none"/><rect x="560" y="10" width="60" height="90" fill="#4f8ee0" transform="rotate(12 590 55)"/></svg>`,
+  ).toString("base64")}`;
+  const dailyRow = (name: string, seconds: number, place: number) => ({
+    steamId: `s-${name}`,
+    skin: skinOf(`s-${name}`),
+    name,
+    place,
+    gap: place === 1 ? null : `+${(seconds - 9.604).toFixed(3)}`,
+    time:
+      seconds < 60
+        ? seconds.toFixed(3)
+        : `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(3).padStart(6, "0")}`,
+  });
+  const daily = {
+    heading: "Yesterday's Daily",
+    title: "Happy Halloween",
+    meta: "Daily · Sat 31 Oct · 291 players",
+    preview,
+    rows: [
+      dailyRow("Sparro", 9.604, 1),
+      dailyRow("snayK", 11.63, 2),
+      dailyRow("[TC] Sailent", 11.732, 3),
+      dailyRow("Slati Jnr", 11.773, 4),
+      dailyRow("123JLaney123", 11.835, 5),
+      dailyRow("acheeks0307", 11.859, 6),
+      dailyRow("Action Jackson", 11.878, 7),
+      dailyRow("Chaos", 11.905, 8),
+      dailyRow("a_name_far_too_long_for_its_row", 11.934, 9),
+      dailyRow("vincentkelley29", 71.5, 10),
+    ],
+  };
+  yield* save(
+    "standings-daily-stand-in",
+    yield* renderer.standings({
+      title: "Saturday 10 October",
+      subtitle: "Standings · 1,286 Workshop Maps · 4,778 players",
+      daily: { ...daily, heading: "Latest Daily", preview: null, rows: daily.rows.slice(0, 7) },
+      boards: [],
+      overall: { rows: [], out: [] },
+    }),
+  );
   yield* save(
     "standings",
     yield* renderer.standings({
       title: "Saturday 10 October",
-      subtitle: "Workshop standings · 1,286 Workshop Maps · 4,778 players",
+      subtitle: "Standings · 1,286 Workshop Maps · 4,778 players",
+      daily,
       boards: [
         {
           title: "Most Maps played",
@@ -343,6 +386,7 @@ const program = Effect.gen(function* () {
           ],
           out: ["Low5ive"],
         },
+        { title: "Most Author Medals", rows: [], out: [] },
         {
           title: "Most world records",
           rows: [
@@ -352,10 +396,9 @@ const program = Effect.gen(function* () {
           ],
           out: [],
         },
-        { title: "Most Author Medals", rows: [], out: [] },
         {
-          title: "Most top 5s",
-          rows: [row("a_name_far_too_long_for_its_row", 608, 1, 0, 9), row("Chaos", 243, 2, 0)],
+          title: "Most Daily wins",
+          rows: [row("a_name_far_too_long_for_its_row", 18, 1, 0, 1), row("Chaos", 9, 2, 0)],
           out: ["purple", "Skylar <3"],
         },
       ],
